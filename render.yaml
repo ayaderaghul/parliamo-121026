@@ -1,0 +1,17 @@
+# Render blueprint: one web service runs the API and serves the front end.
+# The database lives on Neon (free, does not expire); paste its URL when asked.
+services:
+  - type: web
+    name: parliamo
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true   # Render creates a long random secret once
+      - key: DATABASE_URL
+        sync: false           # you paste the Neon connection string in the dashboard
