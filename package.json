@@ -24,7 +24,7 @@
     "vitest": "^2.1.9"
   },
   "engines": {
-    "node": ">=20.6"
+    "node": ">=26.12.1 <27"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
