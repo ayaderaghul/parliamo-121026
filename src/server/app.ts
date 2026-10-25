@@ -2,6 +2,7 @@ import express, { type Request, type Response, type NextFunction } from "express
 import cookieParser from "cookie-parser";
 import { randomInt } from "node:crypto";
 import type { Pool } from "pg";
+import { join } from "node:path";
 import {
   checkPassword,
   clearSession,
@@ -20,6 +21,8 @@ export interface AppOptions {
   secure: boolean;
   /** directory with the built index.html; omitted in API tests */
   publicDir?: string;
+  /** false: nobody can create an account; existing accounts still sign in */
+  registrationOpen: boolean;
 }
 
 // ── validation ──────────────────────────────────────────────────────────────
@@ -77,7 +80,7 @@ const guestTest = (t: any, wantDone: boolean): repo.GuestTest => {
 
 // ── app ─────────────────────────────────────────────────────────────────────
 
-export function createApp({ db, secret, secure, publicDir }: AppOptions) {
+export function createApp({ db, secret, secure, publicDir, registrationOpen }: AppOptions) {
   const app = express();
   app.set("trust proxy", 1); // Render terminates TLS in front of us
   app.disable("x-powered-by");
@@ -109,9 +112,18 @@ export function createApp({ db, secret, secure, publicDir }: AppOptions) {
     res.json({ ok: true });
   });
 
+  // What the page needs to know before it draws the account buttons.
+  app.get("/api/config", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ registrationOpen });
+  });
+
   // ── accounts ──────────────────────────────────────────────────────────────
 
   app.post("/api/auth/register", authLimit, async (req, res) => {
+    if (!registrationOpen) {
+      return res.status(403).json({ error: "Le iscrizioni sono chiuse. Chi ha già un account può accedere." });
+    }
     const name = str(req.body?.name, "nome", 1, 60);
     const mail = email(req.body?.email);
     const password = str(req.body?.password, "password", 8, 200);
@@ -198,6 +210,10 @@ export function createApp({ db, secret, secure, publicDir }: AppOptions) {
   // ── front end ─────────────────────────────────────────────────────────────
 
   if (publicDir) {
+    // Fonts have their content hash in the name: cache for a year, never revalidate.
+    // The page itself is always revalidated, so a deploy is seen on the next load.
+    app.use("/fonts", express.static(join(publicDir, "fonts"), { immutable: true, maxAge: "365d" }));
+    app.use("/fonts", (_req, res) => res.status(404).end()); // never the page instead of a font
     app.use(express.static(publicDir, { index: "index.html", maxAge: 0 }));
     app.get("/{*any}", (_req, res) => res.sendFile("index.html", { root: publicDir }));
   }

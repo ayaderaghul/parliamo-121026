@@ -15,3 +15,5 @@ services:
         generateValue: true   # Render creates a long random secret once
       - key: DATABASE_URL
         sync: false           # you paste the Neon connection string in the dashboard
+      - key: REGISTRATION_OPEN
+        value: "false"        # "true" reopens sign-ups; existing accounts always sign in

@@ -34,6 +34,8 @@ const app = {
   statuses: {} as Record<string, NodeStatus>,
   view: "map" as "map" | "list",
   level: null as E.Cefr | null,
+  /** set from /api/config; closed until the server says otherwise */
+  registrationOpen: false,
 };
 
 let map: SkillMap | null = null;
@@ -129,8 +131,10 @@ function renderAccount() {
     nav.innerHTML = `<span class="who">${esc(app.user.name)}</span>
       <button class="link" data-act="logout">Esci</button>`;
   } else {
-    nav.innerHTML = `<button class="link" data-act="login">Accedi</button>
-      <button class="btn small" data-act="register">Crea un account</button>`;
+    nav.innerHTML = app.registrationOpen
+      ? `<button class="link" data-act="login">Accedi</button>
+      <button class="btn small" data-act="register">Crea un account</button>`
+      : `<button class="btn small" data-act="login">Accedi</button>`;
   }
 }
 
@@ -217,8 +221,10 @@ function renderGuestNote() {
       "Anteprima: i progressi restano su questo browser. Sul sito pubblicato puoi creare un account per salvarli.";
   } else if (app.mode === "guest" && hasData) {
     note.hidden = false;
-    note.innerHTML = `Stai usando Parliamo senza account: i progressi restano su questo browser.
-      <button class="link" data-act="register">Crea un account</button> per ritrovarli su ogni dispositivo.`;
+    note.innerHTML = app.registrationOpen
+      ? `Stai usando Parliamo senza account: i progressi restano su questo browser.
+      <button class="link" data-act="register">Crea un account</button> per ritrovarli su ogni dispositivo.`
+      : `Stai usando Parliamo senza account: i progressi restano su questo browser.`;
   } else note.hidden = true;
 }
 
@@ -387,7 +393,7 @@ function renderResults() {
       ${older.length ? `<h2>Test precedenti</h2><ul class="history">${older
         .map((h) => `<li><span>${day(h.createdAt)}</span><span>${pct(h.score)}</span></li>`).join("")}</ul>` : ""}
 
-      ${app.mode === "guest" ? `<div class="callout"><p><strong>Vuoi conservare questo risultato?</strong>
+      ${app.mode === "guest" && app.registrationOpen ? `<div class="callout"><p><strong>Vuoi conservare questo risultato?</strong>
         Con un account lo ritrovi su ogni dispositivo, insieme agli esercizi.</p>
         <button class="btn" data-act="register">Crea un account</button></div>` : ""}
 
@@ -508,6 +514,7 @@ function answerPractice(choice: number) {
 let authMode: "login" | "register" = "register";
 
 function openAuth(mode: "login" | "register") {
+  if (!app.registrationOpen) mode = "login";
   authMode = mode;
   const d = $("#auth") as HTMLDialogElement;
   const reg = mode === "register";
@@ -532,7 +539,9 @@ function openAuth(mode: "login" | "register") {
       </div>
       <p class="switch">${reg
         ? `Hai già un account? <button type="button" class="link" data-act="login">Accedi</button>`
-        : `Non hai un account? <button type="button" class="link" data-act="register">Creane uno</button>`}</p>
+        : app.registrationOpen
+          ? `Non hai un account? <button type="button" class="link" data-act="register">Creane uno</button>`
+          : `Le iscrizioni sono chiuse.`}</p>
     </form>`;
   if (!d.open) d.showModal();
   (d.querySelector("input") as HTMLInputElement).focus();
@@ -676,6 +685,11 @@ window.addEventListener("hashchange", route);
 
 async function boot() {
   setProgress(await guest.load());
+  try {
+    app.registrationOpen = (await api<{ registrationOpen: boolean }>("/api/config")).registrationOpen === true;
+  } catch {
+    app.registrationOpen = false; // no answer: show sign-in only
+  }
   try {
     const { user } = await api<{ user: User }>("/api/me");
     app.user = user;

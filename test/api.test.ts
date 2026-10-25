@@ -13,7 +13,8 @@ import { replay, type TestRecord } from "../src/shared/progress";
 const url = process.env.TEST_DATABASE_URL;
 if (!url) throw new Error("set TEST_DATABASE_URL");
 const db = new pg.Pool({ connectionString: url });
-const app = createApp({ db, secret: "x".repeat(40), secure: false });
+const app = createApp({ db, secret: "x".repeat(40), secure: false, registrationOpen: true });
+const closed = createApp({ db, secret: "x".repeat(40), secure: false, registrationOpen: false });
 
 beforeAll(async () => {
   await db.query("drop table if exists practice, tests, users cascade");
@@ -62,6 +63,23 @@ describe("accounts", () => {
     expect(wrongEmail.body.error).toBe(wrongPw.body.error);
     const ok = await agent().post("/api/auth/login").send({ email: "chi@example.com", password: "password123" });
     expect(ok.status).toBe(200);
+  });
+
+  it("with registration closed: refuses sign-ups, creates nothing, still lets members in", async () => {
+    expect((await request(closed).get("/api/config")).body).toEqual({ registrationOpen: false });
+    expect((await request(app).get("/api/config")).body).toEqual({ registrationOpen: true });
+
+    const r = await request.agent(closed).post("/api/auth/register")
+      .send({ name: "Nuovo", email: "nuovo@example.com", password: "password123" });
+    expect(r.status).toBe(403);
+    expect(r.headers["set-cookie"]).toBeUndefined();
+    const rows = await db.query("select 1 from users where email = 'nuovo@example.com'");
+    expect(rows.rowCount).toBe(0);
+
+    const member = request.agent(closed);
+    const ok = await member.post("/api/auth/login").send({ email: "chi@example.com", password: "password123" });
+    expect(ok.status).toBe(200);
+    expect((await member.get("/api/progress")).status).toBe(200);
   });
 
   it("rejects a forged token", async () => {

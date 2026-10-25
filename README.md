@@ -5,6 +5,11 @@ practice set; an optional diagnostic test colours the map for you. Anyone can
 use it without an account. With an account, the test, the practice and a test
 left halfway are saved and follow you to any device.
 
+**New accounts are closed.** Existing accounts sign in as usual; visitors use
+the site as guests, with progress kept in their browser. To reopen sign-ups,
+set `REGISTRATION_OPEN=true` in the Render dashboard (Environment): the service
+restarts with it, no deploy needed. Any other value, or none, keeps them closed.
+
 One Render web service runs the API and serves the front end. Data lives in
 Postgres on Neon.
 
@@ -100,7 +105,8 @@ real users, add an engine version to `tests` and keep old versions replayable.
 
 | method | path | what it does |
 |---|---|---|
-| POST | `/api/auth/register` | `{name, email, password}` → account + session cookie |
+| GET | `/api/config` | `{registrationOpen}` |
+| POST | `/api/auth/register` | `{name, email, password}` → account + session cookie; 403 while sign-ups are closed |
 | POST | `/api/auth/login` | `{email, password}` → session cookie |
 | POST | `/api/auth/logout` | clears the cookie |
 | GET | `/api/me` | current user, or 401 |
@@ -125,6 +131,12 @@ real users, add an engine version to `tests` and keep old versions replayable.
   time (bcrypt runs against a dummy hash).
 - Auth routes are rate-limited (20 per 15 minutes per IP, in memory).
 - One test in progress per user is enforced by a partial unique index.
+- Nothing is loaded from a third party. The fonts (Bodoni Moda, Titillium Web,
+  both SIL Open Font License) are copied from their npm packages into
+  `dist/public/fonts/` with a content hash in the name and served by us with a
+  one-year immutable cache, so no visitor's IP address goes to Google Fonts. The
+  build fails if `page.html` ever loads a script, stylesheet, font or image from
+  another site.
 
 Answers are checked in the browser, so a user could fake their own score. For
 a self-assessment that's acceptable; it would not be for a graded exam.

@@ -12,6 +12,8 @@
     "test": "vitest run"
   },
   "devDependencies": {
+    "@fontsource-variable/bodoni-moda": "^5.3.0",
+    "@fontsource/titillium-web": "^5.3.0",
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
