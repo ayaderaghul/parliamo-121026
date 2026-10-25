@@ -9,9 +9,12 @@
 import { DATA } from "../shared/progress";
 import type { Cefr } from "../engine";
 import { PROVERBI, CONSIGLI } from "./testi";
+import { SCENE, sceneOf } from "./scene";
+import { STORIE } from "./storie";
+import { BOTTEGA } from "./bottega";
 
-export type RegionId = "A1" | "A2";
-export const PLAYABLE: RegionId[] = ["A1", "A2"];
+export type RegionId = "A1" | "A2" | "B1" | "B2";
+export const PLAYABLE: RegionId[] = ["A1", "A2", "B1", "B2"];
 
 export interface Region {
   id: Cefr;
@@ -28,8 +31,8 @@ export interface Region {
 export const REGIONS: Region[] = [
   { id: "A1", name: "Veneto", city: "Venezia", title: "Turista", lat: 45.44, lon: 12.33, mult: 1, playable: true },
   { id: "A2", name: "Emilia-Romagna", city: "Bologna", title: "Viandante", lat: 44.49, lon: 11.34, mult: 1.25, playable: true },
-  { id: "B1", name: "Toscana", city: "Firenze", title: "Ospite", lat: 43.77, lon: 11.25, mult: 1.5, playable: false },
-  { id: "B2", name: "Lazio", city: "Roma", title: "Residente", lat: 41.9, lon: 12.5, mult: 1.75, playable: false },
+  { id: "B1", name: "Toscana", city: "Firenze", title: "Ospite", lat: 43.77, lon: 11.25, mult: 1.5, playable: true },
+  { id: "B2", name: "Lazio", city: "Roma", title: "Residente", lat: 41.9, lon: 12.5, mult: 1.75, playable: true },
 ];
 export const regionOf = (id: string) => REGIONS.find((r) => r.id === id);
 
@@ -202,6 +205,8 @@ export interface Town {
   items: string[];
   /** longest chain of prerequisites inside the region: the map's column */
   depth: number;
+  /** a conversation where the rule is needed (B1 and B2 for now); required for the flag when present */
+  scene: boolean;
 }
 
 export const CARDS = new Map<string, Card>();
@@ -209,13 +214,13 @@ export const ITEMS = new Map<string, Item>();
 export const TOWNS = new Map<string, Town>();
 
 for (const s of DATA.skills) {
-  if (s.cefr !== "A1" && s.cefr !== "A2") continue;
+  if (!(PLAYABLE as string[]).includes(s.cefr)) continue;
   const cards = cardsOf(s.id);
   for (const c of cards) CARDS.set(c.id, c);
   const items = (DATA.items[s.id] ?? []).map((it) => ({ id: `${s.id}/q-${hash(it.q)}`, town: s.id, q: it.q, o: it.o }));
   for (const it of items) ITEMS.set(it.id, it);
   TOWNS.set(s.id, {
-    id: s.id, label: s.label, region: s.cefr, weight: s.weight,
+    id: s.id, label: s.label, region: s.cefr as RegionId, weight: s.weight, scene: !!sceneOf(s.id),
     prereqs: s.prereqs.filter((p) => DATA.skills.find((x) => x.id === p)?.cefr === s.cefr),
     cards: cards.map((c) => c.id), items: items.map((i) => i.id), depth: 0,
   });
@@ -243,9 +248,10 @@ const monsterSuffix = (label: string) => {
   return w.length > 2 ? `di ${w.toLowerCase()}` : "";
 };
 
-export { PROVERBI, CONSIGLI };
+export { PROVERBI, CONSIGLI, SCENE, STORIE, BOTTEGA, sceneOf };
 
 /** One hash for all the content: stored with each event, and part of the build id. */
 export const CONTENT_VERSION = hash(
-  [...CARDS.keys(), ...ITEMS.keys(), ...PROVERBI.map((p) => p.id), ...CONSIGLI.map((c) => c.id)].join(","),
+  [...CARDS.keys(), ...ITEMS.keys(), ...PROVERBI.map((p) => p.id), ...CONSIGLI.map((c) => c.id),
+   ...SCENE.map((x) => x.town + ":" + x.turni.length), ...STORIE.map((x) => x.id), ...BOTTEGA.map((x) => x.id)].join(","),
 );

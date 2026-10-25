@@ -1,5 +1,5 @@
 <title>Il Viaggio · Parliamo</title>
-<meta name="description" content="Un viaggio a 8 bit per l'Italia, una regola di grammatica alla volta: Veneto (A1) ed Emilia-Romagna (A2).">
+<meta name="description" content="Un viaggio a 8 bit per l'Italia, una regola di grammatica alla volta: dal Veneto (A1) al Lazio (B2).">
 <meta name="theme-color" content="#1d2b53">
 <!-- Fonts are served from our own server (scripts/build.mjs): no visitor's IP goes to a font CDN. -->
 <style>/*__FONTS__*/</style>
@@ -104,6 +104,27 @@ canvas { display: block; width: 100%; height: auto; background: var(--k); }
 .gold { color: var(--y); }
 .plain { padding-left: 1.2em; } .plain li { margin: .3em 0; }
 
+/* scenes */
+.scene { background: var(--k); padding: 1em 1.2em; margin: 6px; box-shadow: 0 0 0 3px var(--w), 0 0 0 6px var(--k); }
+.scene h2 { margin-top: .1em; }
+.bubble { margin: .5em 0; padding: .55em .8em; max-width: 46em; }
+.bubble.npc { background: var(--n); }
+.bubble.me { background: var(--d); color: var(--w); margin-left: auto; text-align: right; font-family: var(--text); } .bubble.me.bad { background: var(--v); }
+.bubble.fix { background: var(--w); color: var(--n); } .bubble.fix .small { color: var(--a); }
+.opts.col { flex-direction: column; align-items: stretch; } .opts.col .opt { text-align: left; justify-content: flex-start; line-height: 1.35; }
+.card.story p { font-size: 1.05rem; line-height: 1.6; }
+
+/* shop and album */
+.wares { list-style: none; padding: 0; }
+.ware { display: grid; grid-template-columns: 56px 1fr auto; gap: 12px; align-items: center; padding: .55em 0; border-bottom: 2px dotted var(--a); }
+.ware img { width: 48px; height: 48px; object-fit: contain; background: var(--k); padding: 4px; }
+.ware.owned b { color: var(--g); }
+.album { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
+.album figure { margin: 0; background: var(--k); padding: 10px; text-align: center; font: .85rem var(--pixel); }
+.album img { width: 60px; height: 60px; object-fit: contain; }
+.album .missing img { filter: brightness(0) invert(.25); }
+.btn.on { background: var(--d); }
+
 /* dialogs */
 dialog { border: 0; padding: 0; background: transparent; color: var(--w); max-width: min(620px, calc(100vw - 32px)); width: 100%; }
 dialog::backdrop { background: rgba(0, 0, 0, .7); }
@@ -127,6 +148,7 @@ footer a { color: var(--l); }
 
 @media (max-width: 760px) {
   .world { grid-template-columns: 1fr; }
+  .ware { grid-template-columns: 48px 1fr; } .ware > :last-child { grid-column: 2; justify-self: start; }
   h1 { font-size: 1.55rem; }
   #hud .sky { margin-left: 0; text-align: left; }
 }

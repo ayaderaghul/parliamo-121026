@@ -7,6 +7,7 @@
 export const P: Record<string, string> = {
   k: "#000000", n: "#1d2b53", v: "#7e2553", d: "#008751", o: "#ab5236", a: "#5f574f", l: "#c2c3c7", w: "#fff1e8",
   r: "#ff004d", e: "#ffa300", y: "#ffec27", g: "#00e436", b: "#29adff", u: "#83769c", p: "#ff77a8", f: "#ffccaa",
+  c: "#004a2b", // cypress green, darker than the grass
 };
 
 export type Ctx = CanvasRenderingContext2D;
@@ -50,6 +51,38 @@ export const GEM_SPRITE: Record<string, string[]> = {
 };
 export const COIN = [".yyy.", "yyeyy", "yeyey", "yyeyy", ".yyy."];
 
+// ── outfits: drawn on top of (or under) the hero ────────────────────────────
+export const BACKPACK = ["oo", "oe", "oo", "o."]; // on the hero's back, left side
+export const BACKPACK_ICON = [".aaaa.", "a....a", "oooooo", "oeeeeo", "oooooo", "oo..oo", "oooooo"];
+export const BIKE = ["..a.......", ".a.a....aa", "aaaaaaaaa.", "a.a.a.a..a", ".a.....a..", "a.a...a.a.", ".a.....a.."];
+export const VESPA = ["........ll", ".......l..", "..gggggg..", ".gggggggg.", "gggggggggg", ".kk....kk.", ".kk....kk."];
+export const KEYS = ["yy.", "y.y", "yy.", ".y.", ".yy"];
+
+/** The hero, with what they wear. */
+export function drawHero(c: Ctx, x: number, y: number, wearing: string | null, k = 1) {
+  if (wearing === "bicicletta") spr(c, x - 1 * k, y + 7 * k, BIKE, k);
+  if (wearing === "vespa") spr(c, x - 1 * k, y + 6 * k, VESPA, k);
+  spr(c, x, y, HERO, k);
+  if (wearing === "zaino") spr(c, x - 1 * k, y + 5 * k, BACKPACK, k);
+  if (wearing === "chiavi") spr(c, x + 8 * k, y + 5 * k, KEYS, k);
+}
+
+// ── souvenirs, for the album ─────────────────────────────────────────────────
+export const SOUVENIR: Record<string, string[]> = {
+  gondola: ["..........l", ".........u.", "l...r...u..", "uuuuuuuuu..", ".uuuuuuu...", "bbbbbbbbbbb"],
+  maschera: [".yyyyyyy.", "ywwwwwwwy", "ywkwwwkwy", "ywwwwwwwy", ".ywwywwy.", "..yyyyy.."],
+  tortellini: [".fff..fff.", "ffeff.ffef", "feeff.feef", ".fff..fff.", "..........", ".fff..fff.", "fefff.ffef", ".fff..fff."],
+  "due-torri": [".o.....", ".o..o..", ".o..o..", ".o..o..", ".o..o..", ".o..o..", ".o.o...", "lllllll"],
+  "torre-pisa": ["..ww.", "..ww.", "..ww.", ".ww..", ".ww..", ".ww..", "ww...", "lllll"],
+  fiasco: ["..r..", "..e..", ".eee.", "ddddd", "ddrdd", "ddddd", ".ddd."],
+  colosseo: [".ffffffff.", "fofofofoff", "ffffffffff", "fofofofoff", "ffffffffff", "lllllllll."],
+  bocca: [".lllll.", "lllllll", "lklllkl", "lllllll", "llkkkll", "lllllll", ".lllll."],
+};
+
+// ── region scenery ───────────────────────────────────────────────────────────
+export const CYPRESS = [".c.", "ccc", "ccc", "ccc", "ccc", ".o."];
+export const COLUMN = ["fff", ".f.", ".f.", ".f.", ".f.", "fff"];
+
 /** A sprite as a small image, for the HUD and the HTML around the canvas. */
 export function icon(rows: string[], k = 3): string {
   const w = Math.max(...rows.map((r) => r.length)), h = rows.length;
@@ -80,18 +113,24 @@ function inside(x: number, y: number, poly: [number, number][]) {
 const polys = [ITALY, SICILY, SARDINIA].map((p) => p.map(([lo, la]) => [X(lo), Y(la)] as [number, number]));
 const land = (x: number, y: number) => polys.some((p) => inside(x + 0.5, y + 0.5, p));
 
-/** Which game region a pixel belongs to: north of the Po is Veneto's latitude band, and so on. */
-export function regionAtPixel(x: number, y: number): "A1" | "A2" | null {
+export type MapRegion = "A1" | "A2" | "B1" | "B2";
+const CITIES: [MapRegion, number, number][] = [["A1", 45.44, 12.33], ["A2", 44.49, 11.34], ["B1", 43.47, 11.1], ["B2", 41.9, 12.9]];
+/** Which game region a pixel belongs to: the nearest of the four cities, inside the north and centre. */
+export function regionAtPixel(x: number, y: number): MapRegion | null {
   if (!land(x, y)) return null;
   if (y < Y(45.85)) return null; // the Alps
   const lon = (x - 20) / 8.8 + 6, lat = 47.5 - (y - 6) / 12;
-  if (lat >= 44.95 && lon >= 10.6) return "A1";
-  if (lat >= 43.75 && lat < 45.2 && lon >= 9.2) return "A2";
-  return null;
+  if (lat < 41.2 || lat > 45.85 || lon < 9.6 || lon > 14.2) return null;
+  let best: MapRegion | null = null, dist = Infinity;
+  for (const [r, la, lo] of CITIES) {
+    const d = (la - lat) ** 2 + ((lo - lon) * 0.73) ** 2;
+    if (d < dist) { dist = d; best = r; }
+  }
+  return best;
 }
 
 /** The overworld: Italy, the two playable regions lit, the rest under fog. */
-export function drawItaly(c: Ctx, lit: { A1: boolean; A2: boolean }, hover: string | null) {
+export function drawItaly(c: Ctx, lit: Record<MapRegion, boolean>, hover: string | null) {
   const rnd = seeded(7);
   for (let y = 0; y < 140; y++) for (let x = 0; x < 200; x++) {
     if (!land(x, y)) {
@@ -104,7 +143,7 @@ export function drawItaly(c: Ctx, lit: { A1: boolean; A2: boolean }, hover: stri
     let col = coast ? "f" : (x + y) % 7 === 0 ? "g" : "d";
     if (!coast && y < Y(45.85)) col = (x * 3 + y) % 4 === 0 ? "w" : "l";
     if (reg && hover === reg && !coast && (x + y) % 3 === 0) col = "y";
-    const fogged = reg ? !lit[reg] : y > Y(43.75) || x < X(9.2);
+    const fogged = reg ? !lit[reg] : y > Y(43.0) || x < X(9.6);
     if (!coast && fogged && (x + y) % 2 === 0) col = "n";
     px(c, x, y, col);
   }

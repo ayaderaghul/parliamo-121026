@@ -5,6 +5,9 @@ import {
   visitorFor, RuleError, EXAM_SIZE, type GameEvent, type GameState, type EventBody,
 } from "../src/game/rules";
 import { moonAt, skyFromMet, skyFromWmo, dayOf, addDays, cellKey } from "../src/game/cielo";
+import { SCENE, sceneOf, genere } from "../src/game/scene";
+import { STORIE } from "../src/game/storie";
+import { BOTTEGA, HINT_PRICE } from "../src/game/bottega";
 
 const AT = (d: string, h = 10) => `${d}T${String(h).padStart(2, "0")}:00:00.000Z`;
 const ev = (b: EventBody, at: string): GameEvent => ({ ...b, at, v: CONTENT_VERSION } as GameEvent);
@@ -19,8 +22,8 @@ const recallAll = (s: GameState, town: string, at: string) => { for (const c of 
 const flag = (s: GameState, town: string, at: string) => { recallAll(s, town, at); winBattle(s, town, at); };
 
 describe("content", () => {
-  it("cuts every A1 and A2 lesson into cards and keeps 3+ questions per town", () => {
-    expect(TOWNS.size).toBe(54);
+  it("cuts every A1 to B2 lesson into cards and keeps 3+ questions per town", () => {
+    expect(TOWNS.size).toBe(78);
     for (const t of TOWNS.values()) {
       expect(t.cards.length, t.id).toBeGreaterThan(0);
       expect(t.items.length, t.id).toBeGreaterThanOrEqual(3);
@@ -223,5 +226,100 @@ describe("sky and moon", () => {
     expect(dayOf("2026-10-24T22:30:00Z")).toBe("2026-10-25"); // 00:30 in Rome
     expect(addDays("2026-10-31", 1)).toBe("2026-11-01");
     expect(cellKey(45.6712, 11.9349)).toBe("45.7,11.9");
+  });
+});
+
+describe("Toscana and Lazio", () => {
+  it("gives every B1 and B2 town a scene of four turns, three different replies each", () => {
+    for (const t of [...townsIn("B1"), ...townsIn("B2")]) {
+      const sc = sceneOf(t.id);
+      expect(sc, t.id).toBeDefined();
+      expect(t.scene).toBe(true);
+      expect(sc!.turni.length).toBeGreaterThanOrEqual(4);
+      for (const turn of sc!.turni) expect(new Set(turn.o).size, turn.npc).toBe(3);
+    }
+    expect(SCENE.every((s) => TOWNS.has(s.town))).toBe(true);
+  });
+  it("writes {m|f} for the player's own agreement", () => {
+    expect(genere("Sono arrivat{o|a}.", "f")).toBe("Sono arrivata.");
+    expect(genere("Sono arrivat{o|a}.", "m")).toBe("Sono arrivato.");
+  });
+  it("has fairy stories at every level, two questions each with three options", () => {
+    for (const lvl of ["A1", "A2", "B1", "B2"]) expect(STORIE.filter((s) => s.level === lvl).length).toBeGreaterThanOrEqual(6);
+    for (const s of STORIE) { expect(s.domande.length).toBe(2); for (const d of s.domande) expect(new Set(d.o).size).toBe(3); }
+    expect(new Set(STORIE.map((s) => s.id)).size).toBe(STORIE.length);
+  });
+
+  const b1 = townsIn("B1").find((t) => t.prereqs.length === 0)!;
+  /** a player standing in Toscana: A1 and A2 passed */
+  const inToscana = () => { const s = emptyGame(); s.passed = ["A1", "A2"]; return s; };
+
+  it("needs the scene for the flag in B1, and pays emeralds once a day", () => {
+    const s = inToscana();
+    recallAll(s, b1.id, AT("2026-10-25"));
+    winBattle(s, b1.id, AT("2026-10-25"));
+    expect(isFlagged(s, b1.id)).toBe(false);
+    const turns = sceneOf(b1.id)!.turni.length;
+    play(s, { t: "scene", town: b1.id, answers: Array(turns).fill(true) }, AT("2026-10-25", 11));
+    expect(isFlagged(s, b1.id)).toBe(true);
+    expect(gemTotal(s).smeraldo).toBe(turns);
+    play(s, { t: "scene", town: b1.id, answers: Array(turns).fill(true) }, AT("2026-10-25", 12));
+    expect(gemTotal(s).smeraldo).toBe(turns);
+    expect(() => tryStep(s, ev({ t: "scene", town: b1.id, answers: [true] }, AT("2026-10-26")), ok)).toThrow(RuleError);
+  });
+  it("still flags A1 towns without a scene", () => {
+    const s = emptyGame();
+    flag(s, root.id, AT("2026-10-25"));
+    expect(isFlagged(s, root.id)).toBe(true);
+  });
+  it("lets the fairy tell a story on a cloudy day only, paying an emerald per right answer", () => {
+    const s = inToscana();
+    const st = STORIE.find((x) => x.level === "B1")!;
+    expect(() => tryStep(s, ev({ t: "story", id: st.id, answers: [true, true] }, AT("2026-10-25")), { visitor: "lupo" })).toThrow(RuleError);
+    play(s, { t: "story", id: st.id, answers: [true, false] }, AT("2026-10-25"), "fata");
+    expect(gemTotal(s).smeraldo).toBe(1);
+    expect(s.stories).toEqual([st.id]);
+  });
+  it("sells an outfit only in its region and only for enough gold, and wears it", () => {
+    const s = emptyGame();
+    const vespa = BOTTEGA.find((a) => a.id === "vespa")!;
+    s.gold = 1000;
+    expect(() => tryStep(s, ev({ t: "buy", item: "vespa" }, AT("2026-10-25")), ok)).toThrow(/regione/);
+    s.passed = ["A1", "A2"];
+    play(s, { t: "buy", item: "vespa" }, AT("2026-10-25"));
+    expect(s.gold).toBe(1000 - vespa.price);
+    expect(s.wearing).toBe("vespa");
+    expect(() => tryStep(s, ev({ t: "buy", item: "vespa" }, AT("2026-10-25")), ok)).toThrow(/già/);
+    s.gold = 1;
+    expect(() => tryStep(s, ev({ t: "buy", item: "zaino" }, AT("2026-10-25")), ok)).toThrow(/oro/);
+    play(s, { t: "wear", item: "" }, AT("2026-10-25"));
+    expect(s.wearing).toBeNull();
+  });
+  it("charges 10 gold for a quiz hint and pays no gem for that answer", () => {
+    const s = emptyGame();
+    s.gold = 25;
+    const [a, b, c] = root.items;
+    play(s, { t: "battle", town: root.id, answers: [{ item: a, correct: true, hint: true }, { item: b, correct: true }, { item: c, correct: true }] }, AT("2026-10-25"));
+    expect(s.gold).toBe(25 - HINT_PRICE);
+    expect(gemTotal(s).zaffiro).toBe(2);
+    s.gold = 5;
+    expect(() => tryStep(s, ev({ t: "battle", town: root.id, answers: [{ item: a, correct: true, hint: true }, { item: b, correct: true }, { item: c, correct: true }] }, AT("2026-10-26")), ok)).toThrow(/oro/);
+  });
+  it("allows no hints in the exam", () => {
+    const s = emptyGame();
+    const items = townsIn("A1").flatMap((t) => t.items).slice(0, EXAM_SIZE);
+    for (const t of [...townsIn("A1")].sort((x, y) => x.depth - y.depth)) flag(s, t.id, AT("2026-10-25"));
+    s.gold = 500;
+    expect(() => tryStep(s, ev({ t: "exam", region: "A1", answers: items.map((item, i) => ({ item, correct: true, hint: i === 0 })) }, AT("2026-10-25", 12)), ok)).toThrow(/aiutini/);
+  });
+  it("opens Lazio after the Toscana exam", () => {
+    const s = inToscana();
+    for (const t of [...townsIn("B1")].sort((x, y) => x.depth - y.depth)) {
+      flag(s, t.id, AT("2026-10-25"));
+      play(s, { t: "scene", town: t.id, answers: Array(sceneOf(t.id)!.turni.length).fill(true) }, AT("2026-10-25"));
+    }
+    expect(coverage(s, "B1")).toBe(1);
+    play(s, { t: "exam", region: "B1", answers: townsIn("B1").flatMap((t) => t.items).slice(0, EXAM_SIZE).map((item) => ({ item, correct: true })) }, AT("2026-10-25", 12));
+    expect(isUnlocked(s, "B2")).toBe(true);
   });
 });

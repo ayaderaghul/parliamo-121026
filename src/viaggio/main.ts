@@ -1,13 +1,16 @@
 /**
- * Il Viaggio, phase 1: Veneto (A1) and Emilia-Romagna (A2).
+ * Il Viaggio: Veneto (A1), Emilia-Romagna (A2), Toscana (B1) and Lazio (B2).
  *
  * Canvas for the world (overworld, region maps, sprites, rain); HTML for every
  * word (lessons, cards, quizzes, dialogs), so zoom, screen readers and text
  * selection keep working. Every reward is decided by src/game/rules.ts.
  */
 import {
-  CARDS, CONSIGLI, ITEMS, PROVERBI, REGIONS, TOWNS, kindName, monsterOf, regionOf, townsIn, type RegionId,
+  BOTTEGA, CARDS, CONSIGLI, ITEMS, PLAYABLE, PROVERBI, REGIONS, STORIE, TOWNS, kindName, monsterOf, regionOf, sceneOf, townsIn,
+  type RegionId,
 } from "../game/content";
+import { genere } from "../game/scene";
+import { HINT_PRICE, articolo } from "../game/bottega";
 import { DATA } from "../shared/progress";
 import { dayOf } from "../game/cielo";
 import {
@@ -40,7 +43,7 @@ let anim = 0; // the running animation loop's token
 const SKY_WORD: Record<string, string> = { clear: "Sereno", cloud: "Nuvoloso", fog: "Nebbia", rain: "Pioggia", snow: "Neve" };
 const VISITOR: Record<Visitor, { name: string; line: string }> = {
   folletto: { name: "Il Folletto della nebbia", line: "Nella nebbia ti aspetta un folletto con un proverbio." },
-  fata: { name: "La Fata", line: "Sotto le nuvole è passata una fata: ha un consiglio per te." },
+  fata: { name: "La Fata", line: "Sotto le nuvole è passata una fata: ha una storia per te." },
   lupo: { name: "Il Lupo", line: "Luna piena: il lupo ti sfida, 60 secondi di domande." },
   sibilla: { name: "La Sibilla", line: "Luna nuova, nuovo inizio: la Sibilla ti offre un segreto." },
   pioggia: { name: "Pioggia di gemme", line: "Piove! Tocca le gocce sulla mappa per raccoglierle." },
@@ -60,7 +63,7 @@ function rewardLine(s: GameState) {
   for (const [g, n] of Object.entries(s.last.gems) as [Gem, number][]) {
     if (n > 0) parts.push(`${gemIcon(g, 2)} +${n} ${plural(g, n)}`);
   }
-  if (s.last.gold) parts.push(`<b class="gold">+${s.last.gold} oro</b>`);
+  if (s.last.gold) parts.push(`<b class="gold">${s.last.gold > 0 ? "+" : "−"}${Math.abs(s.last.gold)} oro</b>`);
   if (s.last.xp) parts.push(`+${s.last.xp} XP`);
   return parts.join(" · ");
 }
@@ -111,10 +114,12 @@ function route() {
   const [view, arg, tab] = location.hash.replace(/^#/, "").split("/");
   const v = $("#view");
   v.className = "";
-  if (view === "regione" && (arg === "A1" || arg === "A2")) return renderRegion(arg);
+  const isRegion = (x: string | undefined): x is RegionId => (PLAYABLE as string[]).includes(x ?? "");
+  if (view === "regione" && isRegion(arg)) return renderRegion(arg);
   if (view === "citta" && TOWNS.has(decodeURIComponent(arg ?? ""))) return renderTown(decodeURIComponent(arg), tab);
-  if (view === "stazione" && (arg === "A1" || arg === "A2")) return renderExam(arg);
+  if (view === "stazione" && isRegion(arg)) return renderExam(arg);
   if (view === "zaino") return renderBag();
+  if (view === "bottega") return renderShop();
   return renderItaly();
 }
 window.addEventListener("hashchange", route);
@@ -132,18 +137,19 @@ function renderItaly() {
     return `<a class="regcard ${open ? "" : "locked"}" href="${open ? `#regione/${r}` : "#italia"}" ${open ? "" : 'aria-disabled="true"'}>
       <b>${R.name.toUpperCase()}</b> <span>${r} · ${esc(R.city)}</span>
       ${open ? `<span class="bar"><i style="width:${cov}%"></i></span><small>${cov}% delle regole · treno a ${COVERAGE_FOR_EXAM * 100}%</small>`
-             : `<small>Si apre col treno da ${regionOf(PLAYABLE_PREV(r))!.name}</small>`}
+             : `<small>Si apre col treno da ${regionOf(PLAYABLE[PLAYABLE.indexOf(r) - 1])!.name}</small>`}
       ${s.passed.includes(r) ? `<small class="ok">Esame superato</small>` : ""}</a>`;
   };
   const vis = todayInfo?.visitor;
   v.innerHTML = `
     <div class="world">
-      <canvas id="map" width="200" height="140" aria-label="Mappa d'Italia: Veneto ed Emilia-Romagna si possono visitare"></canvas>
+      <canvas id="map" width="200" height="140" aria-label="Mappa d'Italia: Veneto, Emilia-Romagna, Toscana e Lazio"></canvas>
       <aside class="side">
         <h1>Il Viaggio</h1>
         <p>Un viaggio per l'Italia, una regola alla volta. Ogni regione è un livello, ogni città una regola di Parliamo.</p>
-        ${regionCard("A1")}${regionCard("A2")}
-        <div class="regcard locked"><b>TOSCANA, LAZIO…</b><span>B1 · B2 · C1 · C2</span><small>Nella nebbia, per ora.</small></div>
+        ${PLAYABLE.map(regionCard).join("")}
+        <div class="regcard locked"><b>CAMPANIA, SICILIA</b><span>C1 · C2</span><small>Nella nebbia, per ora.</small></div>
+        <p><a class="btn" href="#bottega">La bottega</a> <a class="btn" href="#zaino">Zaino e album</a></p>
         ${vis && !s.visited.includes(vis) ? `<p class="visit">${VISITOR[vis].line} <a href="#regione/${currentRegion(s)}">Vai</a></p>` : ""}
         ${game.kind === "account" && !s.importDone ? `<p class="small">Hai fatto il test diagnostico di Parliamo?
           <button class="link" data-act="import">Usalo come esame d'ingresso</button>: le regole giuste diventano città con la bandiera.</p>` : ""}
@@ -154,14 +160,14 @@ function renderItaly() {
   const c = px.fitCanvas(cv, 200, 140);
   let hover: string | null = null;
   const draw = () => {
-    px.drawItaly(c, { A1: isUnlocked(s, "A1"), A2: isUnlocked(s, "A2") }, hover);
+    px.drawItaly(c, { A1: isUnlocked(s, "A1"), A2: isUnlocked(s, "A2"), B1: isUnlocked(s, "B1"), B2: isUnlocked(s, "B2") }, hover);
     for (const R of REGIONS) {
       const x = Math.round(px.X(R.lon)) - 3, y = Math.round(px.Y(R.lat)) - 5;
       px.spr(c, x, y, px.HOUSE, 1, R.playable && isUnlocked(s, R.id as RegionId) ? {} : { r: px.P.a, w: px.P.u, o: px.P.n });
       if (s.passed.includes(R.id as RegionId)) px.spr(c, x + 6, y - 5, px.FLAG);
     }
     const here = regionOf(currentRegion(s))!;
-    px.spr(c, Math.round(px.X(here.lon)) - 13, Math.round(px.Y(here.lat)) - 9, px.HERO);
+    px.drawHero(c, Math.round(px.X(here.lon)) - 13, Math.round(px.Y(here.lat)) - 9, s.wearing);
   };
   draw();
   const at = (ev: MouseEvent) => {
@@ -171,9 +177,10 @@ function renderItaly() {
   cv.addEventListener("mousemove", (ev) => { const h = at(ev); if (h !== hover) { hover = h; draw(); cv.style.cursor = h ? "pointer" : "default"; } });
   cv.addEventListener("click", (ev) => { const r = at(ev); if (r && isUnlocked(s, r)) location.hash = `#regione/${r}`; });
 }
-const PLAYABLE_PREV = (r: RegionId): RegionId => (r === "A2" ? "A1" : "A1");
 
 // ── a region ─────────────────────────────────────────────────────────────────
+
+const NEXT_NAME: Record<RegionId, string> = { A1: "l'Emilia-Romagna", A2: "la Toscana", B1: "il Lazio", B2: "la Campania (presto)" };
 
 const RW = 320, RH = 180;
 function layout(r: RegionId) {
@@ -215,7 +222,7 @@ function renderRegion(r: RegionId) {
     <div class="regionbar">
       <span class="bar"><i style="width:${Math.round(cov * 100)}%"></i></span>
       <span>${Math.round(cov * 100)}% delle regole con la bandiera, pesate come nel test.</span>
-      ${s.passed.includes(r) ? `<b class="ok">Esame superato</b>` : `<a class="btn" href="#stazione/${r}">Stazione: esame per ${r === "A1" ? "l'Emilia-Romagna" : "la Toscana"}</a>`}
+      ${s.passed.includes(r) ? `<b class="ok">Esame superato</b>` : `<a class="btn" href="#stazione/${r}">Stazione: esame per ${NEXT_NAME[r]}</a>`}
     </div>
     <h2>Le città</h2>
     <ul class="towns">${[...ts].sort((a, b) => a.depth - b.depth).map((t) => {
@@ -223,13 +230,18 @@ function renderRegion(r: RegionId) {
       const n = t.cards.filter((c) => recalled(s, c)).length;
       return `<li class="t-${st}">${st === "locked" ? `<span>${esc(t.label)}</span>` : `<a href="#citta/${encodeURIComponent(t.id)}">${esc(t.label)}</a>`}
         <small>${st === "locked" ? "chiusa: prima " + t.prereqs.filter((p) => !isFlagged(s, p)).map((p) => esc(TOWNS.get(p)!.label)).join(", ")
-          : st === "flag" ? "bandiera" : st === "weeds" ? "erbacce: ripasso" : `${n}/${t.cards.length} mattoni${s.quizWon[t.id] ? " · quiz vinto" : ""}`}</small></li>`;
+          : st === "flag" ? "bandiera" : st === "weeds" ? "erbacce: ripasso"
+          : `${n}/${t.cards.length} mattoni${s.quizWon[t.id] ? " · quiz vinto" : ""}${t.scene ? (s.scenes[t.id] ? " · scena fatta" : " · scena da fare") : ""}`}</small></li>`;
     }).join("")}</ul>`;
 
   const cv = $<HTMLCanvasElement>("#rmap");
   const c = px.fitCanvas(cv, RW, RH);
-  const rnd = px.seeded(r === "A1" ? 11 : 23);
+  const rnd = px.seeded({ A1: 11, A2: 23, B1: 37, B2: 41 }[r]);
   const grass: [number, number][] = Array.from({ length: 140 }, () => [rnd() * RW, rnd() * RH]);
+  // cypresses or columns where no town stands
+  const scenery: [number, number][] = Array.from({ length: 160 }, () => [Math.floor(rnd() * (RW - 44)) + 4, Math.floor(rnd() * (RH - 30)) + 8] as [number, number])
+    .filter(([x, y]) => [...pos.values()].every((q) => Math.hypot(q.x - x - 1, q.y - y - 3) > 10) && Math.abs(x - (RW - 28)) > 14)
+    .slice(0, 26);
   const drops = raining ? px.newDrops(DROPS_PER_DAY - s.drops, RW, RH) : [];
   if (raining && reduced()) drops.forEach((d) => (d.y = 20 + Math.random() * (RH - 40)));
   const visitorAt = { x: RW - 40, y: 16 };
@@ -239,10 +251,16 @@ function renderRegion(r: RegionId) {
   const draw = (t: number) => {
     rect(c, 0, 0, RW, RH, "d");
     for (const [x, y] of grass) px.px(c, x, y, "g");
-    if (r === "A1") { // the lagoon to the east
+    if (r === "A1") {        // the lagoon to the east
       for (let y = 0; y < RH; y++) px.rect(c, RW - 22 + Math.round(Math.sin(y / 9) * 3), y, 30, 1, "n");
-    } else {           // the Po along the north
+    } else if (r === "A2") { // the Po along the north
       for (let x = 0; x < RW; x++) px.rect(c, x, 6 + Math.round(Math.sin(x / 17) * 2), 1, 3, "b");
+    } else if (r === "B1") { // rolling hills and rows of cypresses
+      for (let x = 0; x < RW; x++) px.rect(c, x, RH - 14 + Math.round(Math.sin(x / 23) * 5), 1, 20, "o");
+      for (const [x, y] of scenery) px.spr(c, x, y, px.CYPRESS);
+    } else {                 // the Tiber and the ruins
+      for (let y = 0; y < RH; y++) px.rect(c, 150 + Math.round(Math.sin(y / 14) * 18), y, 5, 1, "b");
+      for (const [x, y] of scenery) px.spr(c, x, y, px.COLUMN);
     }
     // roads
     for (const town of ts) for (const p of town.prereqs) {
@@ -263,7 +281,7 @@ function renderRegion(r: RegionId) {
       if (st === "weeds") px.spr(c, p.x - 7, p.y - 2, px.WEED);
     }
     const h = pos.get(lastTown) ?? pos.get(ts.find((x) => isOpen(s, x.id))?.id ?? "")!;
-    if (h) px.spr(c, h.x - 12, h.y - 9 + (reduced() ? 0 : Math.round(Math.sin(t / 300))), px.HERO);
+    if (h) px.drawHero(c, h.x - 12, h.y - 9 + (reduced() ? 0 : Math.round(Math.sin(t / 300))), s.wearing);
     if (visitorHere) px.spr(c, visitorAt.x, visitorAt.y + (reduced() ? 0 : Math.round(Math.sin(t / 250) * 2)), sprite);
     if (todayInfo?.reading.sky === "fog") px.drawFog(c, RW, RH, t);
     if (todayInfo?.reading.sky === "cloud") px.drawClouds(c, RW, t);
@@ -334,24 +352,23 @@ function renderTown(id: string, tab = "") {
     ["lezione", "Lezione", !!s.lessons[id]],
     ["mattoni", `Mattoni ${n}/${t.cards.length}`, n === t.cards.length],
     ["quiz", "Quiz", !!s.quizWon[id]],
+    ...(t.scene ? [["scena", "Scena", !!s.scenes[id]] as [string, string, boolean]] : []),
     ["cambio", "Cambiavalute", false],
   ];
-  const active = tabs.some(([k]) => k === tab) ? tab : !s.lessons[id] ? "lezione" : n < t.cards.length ? "mattoni" : "quiz";
+  const active = tabs.some(([k]) => k === tab) ? tab
+    : !s.lessons[id] ? "lezione" : n < t.cards.length ? "mattoni" : !s.quizWon[id] || !t.scene ? "quiz" : "scena";
   v.innerHTML = `
     <nav class="crumbs"><a href="#italia">Italia</a> › <a href="#regione/${t.region}">${esc(regionOf(t.region)!.name)}</a> › ${esc(t.label)}</nav>
     <canvas id="tbanner" width="320" height="56" aria-hidden="true"></canvas>
     <h1>${esc(t.label)} ${flagged ? `<span class="flag">bandiera</span>` : ""}</h1>
-    <p class="small">Per la bandiera: ricorda tutti i mattoni e vinci il quiz contro ${esc(monsterOf(id))}.</p>
+    <p class="small">Per la bandiera: ricorda tutti i mattoni, vinci il quiz contro ${esc(monsterOf(id))}${t.scene ? " e porta a termine la scena" : ""}.</p>
     <div class="tabs" role="tablist">${tabs.map(([k, label, done]) =>
-      `<a role="tab" href="#citta/${encodeURIComponent(id)}/${k}" aria-selected="${k === active}" class="${done ? "done" : ""}">${label}${done ? " ✓" : ""}</a>`).join("")}</div>
+      `<a role="tab" data-k="${k}" href="#citta/${encodeURIComponent(id)}/${k}" aria-selected="${k === active}" class="${done ? "done" : ""}">${label}${done ? " ✓" : ""}</a>`).join("")}</div>
     <section id="panel"></section>`;
 
   const c = px.fitCanvas($<HTMLCanvasElement>("#tbanner"), 320, 56);
-  px.rect(c, 0, 0, 320, 56, "b");
-  px.rect(c, 0, 20, 320, 26, "o");
-  for (let x = 4; x < 320; x += 20) { px.rect(c, x + 3, 30, 14, 16, "v"); px.rect(c, x, 28, 3, 18, "e"); }
-  for (let y = 46; y < 56; y++) for (let x = 0; x < 320; x++) px.px(c, x, y, ((x >> 2) + (y >> 2)) % 2 ? "l" : "u");
-  px.spr(c, 40, 34, px.HERO);
+  townBanner(c, t.region);
+  px.drawHero(c, 40, 34, s.wearing);
   if (!s.quizWon[id]) px.spr(c, 270, 39, px.MONSTER);
   if (flagged) { px.rect(c, 300, 12, 1, 34, "l"); px.spr(c, 300, 12, px.FLAG); }
 
@@ -359,7 +376,29 @@ function renderTown(id: string, tab = "") {
   if (active === "lezione") lessonPanel(panel, id);
   else if (active === "mattoni") cardsPanel(panel, id);
   else if (active === "quiz") quizPanel(panel, id);
+  else if (active === "scena") scenePanel(panel, id);
   else bagPanel(panel);
+}
+
+/** A strip of each region's streets above the town's name. */
+function townBanner(c: px.Ctx, r: RegionId) {
+  px.rect(c, 0, 0, 320, 56, "b");
+  if (r === "A1") {        // Venetian houses over a canal
+    for (let x = 0; x < 320; x += 26) { px.rect(c, x, 14, 24, 32, ["r", "e", "f", "p"][(x / 26) % 4]); px.rect(c, x + 5, 20, 5, 8, "n"); px.rect(c, x + 14, 20, 5, 8, "n"); }
+    for (let y = 46; y < 56; y++) px.rect(c, 0, y, 320, 1, y % 3 ? "n" : "b");
+  } else if (r === "A2") { // Bologna's porticoes
+    px.rect(c, 0, 20, 320, 26, "o");
+    for (let x = 4; x < 320; x += 20) { px.rect(c, x + 3, 30, 14, 16, "v"); px.rect(c, x, 28, 3, 18, "e"); }
+    for (let y = 46; y < 56; y++) for (let x = 0; x < 320; x++) px.px(c, x, y, ((x >> 2) + (y >> 2)) % 2 ? "l" : "u");
+  } else if (r === "B1") { // Tuscan hills, cypresses and a stone wall
+    for (let x = 0; x < 320; x++) px.rect(c, x, 26 + Math.round(Math.sin(x / 30) * 6), 1, 30, "d");
+    for (let x = 8; x < 320; x += 34) px.spr(c, x, 18 + Math.round(Math.sin(x / 30) * 6), px.CYPRESS, 2);
+    for (let y = 46; y < 56; y++) for (let x = 0; x < 320; x++) px.px(c, x, y, ((x >> 3) + (y >> 2)) % 2 ? "f" : "o");
+  } else {                 // Rome: ruins and travertine
+    px.rect(c, 0, 40, 320, 6, "f");
+    for (let x = 6; x < 320; x += 22) px.spr(c, x, 14, px.COLUMN, 4);
+    for (let y = 46; y < 56; y++) for (let x = 0; x < 320; x++) px.px(c, x, y, ((x >> 2) + (y >> 2)) % 2 ? "a" : "l");
+  }
 }
 
 function lessonPanel(panel: HTMLElement, id: string) {
@@ -410,13 +449,27 @@ function cardsPanel(panel: HTMLElement, id: string) {
   }));
 }
 
-/** Four options, shuffled; resolves with the answer. */
-function ask(host: HTMLElement, itemId: string, header = ""): Promise<Answer> {
+/**
+ * Four options, shuffled; resolves with the answer. With `canHint`, an
+ * Aiutino button (HINT_PRICE gold) removes two wrong options; that answer
+ * then pays no gem.
+ */
+function ask(host: HTMLElement, itemId: string, header = "", canHint?: () => boolean): Promise<Answer> {
   const it = ITEMS.get(itemId)!;
   const opts = shuffle(it.o.map((o, i) => ({ o, right: i === 0 })));
+  let hinted = false;
   host.innerHTML = `${header}<p class="q">${esc(it.q)}</p>
     <div class="opts">${opts.map((x, i) => `<button class="btn opt" data-i="${i}">${esc(x.o)}</button>`).join("")}</div>
+    ${canHint ? `<p><button class="link small" data-hint ${canHint() ? "" : "disabled"}>Aiutino: togli due risposte sbagliate (${HINT_PRICE} oro, niente gemma)</button></p>` : ""}
     <p class="fb" aria-live="assertive"></p>`;
+  host.querySelector<HTMLButtonElement>("[data-hint]")?.addEventListener("click", (e) => {
+    const btn = e.currentTarget as HTMLButtonElement;
+    if (hinted || !canHint!()) return;
+    hinted = true;
+    btn.disabled = true;
+    const wrong = shuffle(opts.map((x, i) => ({ x, i })).filter(({ x }) => !x.right)).slice(0, 2);
+    for (const { i } of wrong) { const b = host.querySelector<HTMLButtonElement>(`.opt[data-i="${i}"]`)!; b.disabled = true; b.style.visibility = "hidden"; }
+  });
   return new Promise((resolve) => {
     host.querySelectorAll<HTMLButtonElement>(".opt").forEach((b) => b.addEventListener("click", () => {
       const pick = opts[Number(b.dataset.i)];
@@ -425,7 +478,7 @@ function ask(host: HTMLElement, itemId: string, header = ""): Promise<Answer> {
         if (opts[i].right) x.classList.add("right");
       });
       if (!pick.right) b.classList.add("wrong");
-      setTimeout(() => resolve({ item: itemId, correct: pick.right }), pick.right ? 500 : 1200);
+      setTimeout(() => resolve(hinted ? { item: itemId, correct: pick.right, hint: true } : { item: itemId, correct: pick.right }), pick.right ? 500 : 1200);
     }));
   });
 }
@@ -441,8 +494,9 @@ async function quizPanel(panel: HTMLElement, id: string) {
     <p class="hp" aria-label="Vita del mostro">${"♥".repeat(3)}</p><div id="q"></div></div>`;
   const answers: Answer[] = [];
   let hp = 3;
+  const canHint = () => (answers.filter((a) => a.hint).length + 1) * HINT_PRICE <= game.state.gold;
   for (let i = 0; i < items.length; i++) {
-    const a = await ask($("#q", panel), items[i], `<p class="small">Domanda ${i + 1} di 3</p>`);
+    const a = await ask($("#q", panel), items[i], `<p class="small">Domanda ${i + 1} di 3</p>`, canHint);
     answers.push(a);
     if (a.correct) hp--;
     $(".hp", panel).textContent = "♥".repeat(hp) + "♡".repeat(3 - hp);
@@ -459,18 +513,83 @@ async function quizPanel(panel: HTMLElement, id: string) {
     <p>${answers.filter((x) => x.correct).length} risposte giuste su 3. ${won ? `${esc(monster)} scappa.` : "Ne servono 2 su 3."}</p>
     <p>${rewardLine(res) || "Nessuna gemma: queste domande le avevi già fatte oggi."}</p>
     <p>${isFlagged(res, id) ? `<b class="ok">Bandiera!</b> <a class="btn" href="#regione/${t.region}">Alla mappa</a>`
-        : won ? `<a class="btn" href="#citta/${encodeURIComponent(id)}/mattoni">Mancano dei mattoni</a>`
+        : won && !t.cards.every((c) => recalled(res, c)) ? `<a class="btn" href="#citta/${encodeURIComponent(id)}/mattoni">Mancano dei mattoni</a>`
+        : won ? `<a class="btn" href="#citta/${encodeURIComponent(id)}/scena">Alla scena</a>`
         : `<button class="btn" data-act="again">Riprova</button> <a class="link" href="#citta/${encodeURIComponent(id)}/lezione">Rileggi la lezione</a>`}</p></div>`;
   panel.querySelector('[data-act="again"]')?.addEventListener("click", () => quizPanel(panel, id));
   renderTownTabs(id);
 }
+// ── a scene ──────────────────────────────────────────────────────────────────
+
+/** First-person agreement in scenes: the player says how they speak of themselves. */
+const GKEY = "viaggio.genere";
+const getGenere = (): "m" | "f" | null => { try { const g = localStorage.getItem(GKEY); return g === "m" || g === "f" ? g : null; } catch { return null; } };
+const setGenere = (g: "m" | "f") => { try { localStorage.setItem(GKEY, g); } catch { /* in memory only */ } };
+let genereNow: "m" | "f" | null = null;
+const g = (text: string) => genere(text, genereNow ?? getGenere() ?? "f");
+
+async function chooseGenere(): Promise<void> {
+  if (getGenere() || genereNow) return;
+  const d = dialog(`<h2>COME PARLI DI TE?</h2>
+    <p>Nelle scene parli in prima persona, e in italiano il participio e l'aggettivo cambiano: <i>sono arrivata</i> o <i>sono arrivato</i>.</p>
+    <p><button class="btn" data-g="f">Al femminile</button> <button class="btn" data-g="m">Al maschile</button></p>
+    <p class="small">Si può cambiare nello zaino.</p>`);
+  await new Promise<void>((res) => d.querySelectorAll<HTMLButtonElement>("[data-g]").forEach((b) => b.addEventListener("click", () => {
+    genereNow = b.dataset.g as "m" | "f";
+    setGenere(genereNow);
+    d.close();
+    res();
+  })));
+}
+
+async function scenePanel(panel: HTMLElement, id: string) {
+  const sc = sceneOf(id)!;
+  await chooseGenere();
+  panel.innerHTML = `<div class="scene">
+    <p class="small">${esc(sc.luogo)} · con ${esc(sc.chi.toLowerCase())}</p>
+    <h2>${esc(sc.titolo)}</h2><div id="talk" aria-live="polite"></div><div id="reply"></div></div>`;
+  const talk = $("#talk", panel), reply = $("#reply", panel);
+  const answers: boolean[] = [];
+  for (const [i, turn] of sc.turni.entries()) {
+    talk.insertAdjacentHTML("beforeend", `<p class="bubble npc"><b>${esc(sc.chi)}:</b> ${esc(g(turn.npc))}</p>`);
+    const opts = shuffle(turn.o.map((o, k) => ({ o: g(o), right: k === 0 })));
+    reply.innerHTML = `<p class="small">Battuta ${i + 1} di ${sc.turni.length}: rispondi</p>
+      <div class="opts col">${opts.map((x, k) => `<button class="btn opt" data-k="${k}">${esc(x.o)}</button>`).join("")}</div>`;
+    const pick = await new Promise<{ o: string; right: boolean }>((res) =>
+      reply.querySelectorAll<HTMLButtonElement>(".opt").forEach((b) => b.addEventListener("click", () => res(opts[Number(b.dataset.k)]))));
+    answers.push(pick.right);
+    const right = opts.find((x) => x.right)!;
+    talk.insertAdjacentHTML("beforeend", `<p class="bubble me ${pick.right ? "good" : "bad"}"><b>Tu:</b> ${esc(pick.o)}</p>`);
+    if (!pick.right) talk.insertAdjacentHTML("beforeend", `<p class="bubble fix">Meglio: <b>${esc(right.o)}</b><br><span class="small">${esc(turn.perche)}</span></p>`);
+    if (turn.poi) talk.insertAdjacentHTML("beforeend", `<p class="bubble npc"><b>${esc(sc.chi)}:</b> ${esc(g(turn.poi))}</p>`);
+    reply.innerHTML = "";
+    talk.lastElementChild?.scrollIntoView({ block: "nearest", behavior: reduced() ? "auto" : "smooth" });
+    await new Promise((r) => setTimeout(r, pick.right ? 400 : 900));
+  }
+  let res: GameState;
+  try { res = await send({ t: "scene", town: id, answers }); } catch { return; }
+  const n = answers.filter(Boolean).length;
+  reply.innerHTML = `<div class="battle result won"><h2>Fine della scena</h2>
+    <p>${n} risposte giuste su ${answers.length}. ${rewardLine(res) || "Oggi questa scena ha già pagato: niente gemme."}</p>
+    <p>${isFlagged(res, id) ? `<b class="ok">Bandiera!</b> <a class="btn" href="#regione/${TOWNS.get(id)!.region}">Alla mappa</a>`
+      : `<a class="btn" href="#citta/${encodeURIComponent(id)}">Cosa manca per la bandiera?</a>`}
+      <button class="link" data-act="again">Rifai la scena</button> ${segnala(`scena ${id}`)}</p></div>`;
+  reply.querySelector('[data-act="again"]')?.addEventListener("click", () => scenePanel(panel, id));
+  renderTownTabs(id);
+}
+
 /** Refresh the tick marks without leaving the panel. */
 function renderTownTabs(id: string) {
   const s = game.state;
   const t = TOWNS.get(id)!;
-  const tabs = document.querySelectorAll<HTMLAnchorElement>(".tabs a");
-  const done = [!!s.lessons[id], t.cards.every((c) => recalled(s, c)), !!s.quizWon[id], false];
-  tabs.forEach((a, i) => { a.classList.toggle("done", done[i]); if (done[i] && !a.textContent!.endsWith("✓")) a.textContent += " ✓"; });
+  const done: Record<string, boolean> = {
+    lezione: !!s.lessons[id], mattoni: t.cards.every((c) => recalled(s, c)), quiz: !!s.quizWon[id], scena: !!s.scenes[id], cambio: false,
+  };
+  document.querySelectorAll<HTMLAnchorElement>(".tabs a").forEach((a) => {
+    const d = done[a.dataset.k ?? ""];
+    a.classList.toggle("done", d);
+    if (d && !a.textContent!.endsWith("✓")) a.textContent += " ✓";
+  });
 }
 
 function bagPanel(panel: HTMLElement) {
@@ -484,7 +603,7 @@ function bagPanel(panel: HTMLElement) {
       Nelle regioni più a sud ogni gemma vale di più.</p>
     ${rows.length ? `<table><thead><tr><th>Gemma</th><th>Regione</th><th>Quante</th><th>Oro l'una</th></tr></thead><tbody>${rows.join("")}</tbody></table>
       <p><button class="btn" data-act="exchange">Cambia tutto: ${value} oro</button></p>` : `<p>Lo zaino è vuoto.</p>`}
-    <p class="small">Hai <b class="gold">${s.gold} oro</b>. L'oro compra vestiti e souvenir (presto), mai una bandiera o un livello.</p></div>`;
+    <p class="small">Hai <b class="gold">${s.gold} oro</b>. L'oro compra vestiti, souvenir e aiutini nei quiz alla <a href="#bottega">bottega</a>: mai una bandiera o un livello.</p></div>`;
   panel.querySelector('[data-act="exchange"]')?.addEventListener("click", async () => {
     try { await send({ t: "exchange" }); } catch { return; }
     bagPanel(panel);
@@ -501,8 +620,57 @@ function renderBag() {
       return `<li><b>${esc(p.testo.replace("___", p.o[0]))}</b> <span class="small">${esc(p.en)}</span></li>`; }).join("")}</ul>` : `<p class="small">Nessuno ancora: il folletto viene coi giorni di nebbia.</p>`}
     <h2>Segreti della Sibilla</h2>${s.tips.length ? `<ul class="plain">${s.tips.map((id) => {
       const c = CONSIGLI.find((x) => x.id === id)!;
-      return `<li><b>${esc(c.it)}</b> ${esc(c.en)}<br><span class="small">${esc(c.esempio)} ${esc(c.nota)}</span></li>`; }).join("")}</ul>` : `<p class="small">Nessuno ancora: la Sibilla viene con la luna nuova.</p>`}`;
+      return `<li><b>${esc(c.it)}</b> ${esc(c.en)}<br><span class="small">${esc(c.esempio)} ${esc(c.nota)}</span></li>`; }).join("")}</ul>` : `<p class="small">Nessuno ancora: la Sibilla viene con la luna nuova.</p>`}
+    <h2>Le storie della fata</h2>${s.stories.length ? `<ul class="plain">${s.stories.map((id) => {
+      const st = STORIE.find((x) => x.id === id)!;
+      return `<li><b>${esc(st.titolo)}</b> <span class="small">${st.level}</span><br><span class="small">${esc(st.testo)}</span></li>`; }).join("")}</ul>` : `<p class="small">Nessuna ancora: la fata viene coi giorni nuvolosi.</p>`}
+    <h2>Album dei souvenir</h2><div class="album">${BOTTEGA.filter((a) => a.kind === "souvenir").map((a) =>
+      `<figure class="${s.owned.includes(a.id) ? "" : "missing"}"><img src="${ICONS["s-" + a.id]}" alt="" width="60" height="60"><figcaption>${s.owned.includes(a.id) ? esc(a.name) : "?"}</figcaption></figure>`).join("")}</div>
+    <h2>Come parli di te nelle scene</h2>
+    <p><button class="btn ${getGenere() === "f" ? "on" : ""}" data-genere="f">Al femminile</button>
+      <button class="btn ${getGenere() === "m" ? "on" : ""}" data-genere="m">Al maschile</button></p>`;
   bagPanel($("#panel"));
+  v.querySelectorAll<HTMLButtonElement>("[data-genere]").forEach((b) => b.addEventListener("click", () => {
+    setGenere(b.dataset.genere as "m" | "f"); genereNow = b.dataset.genere as "m" | "f"; renderBag();
+  }));
+}
+
+// ── the shop ─────────────────────────────────────────────────────────────────
+
+function renderShop() {
+  const s = game.state;
+  const v = $("#view");
+  v.className = "bottega";
+  const row = (a: (typeof BOTTEGA)[number]) => {
+    const owned = s.owned.includes(a.id);
+    const reachable = isUnlocked(s, a.region as RegionId);
+    const wearing = s.wearing === a.id;
+    return `<li class="ware ${owned ? "owned" : ""}">
+      <img src="${ICONS[(a.kind === "outfit" ? "o-" : "s-") + a.id]}" alt="" width="48" height="48">
+      <span><b>${esc(a.name)}</b><br><span class="small">${esc(a.line)} · ${regionOf(a.region)!.name}</span></span>
+      ${owned
+        ? a.kind === "outfit"
+          ? `<button class="btn" data-wear="${wearing ? "" : a.id}">${wearing ? "Togli" : "Indossa"}</button>`
+          : `<span class="ok">Nell'album</span>`
+        : reachable
+          ? `<button class="btn" data-buy="${a.id}" ${s.gold < a.price ? "disabled" : ""}>${a.price} oro</button>`
+          : `<span class="small">Arriva in ${regionOf(a.region)!.name}</span>`}</li>`;
+  };
+  v.innerHTML = `<nav class="crumbs"><a href="#italia">Italia</a> › Bottega</nav>
+    <h1>La bottega</h1>
+    <p>Hai <b class="gold">${s.gold} oro</b>. Le gemme si cambiano in oro al cambiavalute di ogni città.
+      Nei quiz, un aiutino costa ${HINT_PRICE} oro: toglie due risposte sbagliate, e quella risposta non paga gemme.</p>
+    <h2>Vestiti e mezzi</h2><ul class="wares">${BOTTEGA.filter((a) => a.kind === "outfit").map(row).join("")}</ul>
+    <h2>Souvenir</h2><ul class="wares">${BOTTEGA.filter((a) => a.kind === "souvenir").map(row).join("")}</ul>`;
+  v.querySelectorAll<HTMLButtonElement>("[data-buy]").forEach((b) => b.addEventListener("click", async () => {
+    b.disabled = true;
+    try { await send({ t: "buy", item: b.dataset.buy! }); toast(`Comprato: ${esc(articolo(b.dataset.buy!)!.name)}!`); } catch { /* shown */ }
+    renderShop();
+  }));
+  v.querySelectorAll<HTMLButtonElement>("[data-wear]").forEach((b) => b.addEventListener("click", async () => {
+    try { await send({ t: "wear", item: b.dataset.wear! }); } catch { /* shown */ }
+    renderShop();
+  }));
 }
 
 // ── the station exam ─────────────────────────────────────────────────────────
@@ -540,7 +708,8 @@ async function renderExam(r: RegionId) {
   const passed = res.passed.includes(r);
   v.innerHTML = `${head}<div class="battle result ${passed ? "won" : "lost"}"><h2>${passed ? "Promosso!" : "Non ancora"}</h2>
     <p>${right} su ${EXAM_SIZE}.</p>
-    ${passed ? `<p>Sei <b>${titleOf(res)}</b>. ${r === "A1" ? "Il treno per Bologna parte: l'Emilia-Romagna è aperta." : "La Toscana arriverà presto."}</p><p><a class="btn" href="#italia">Alla mappa</a></p>`
+    ${passed ? `<p>Sei <b>${titleOf(res)}</b>. ${{ A1: "Il treno per Bologna parte: l'Emilia-Romagna è aperta.", A2: "Il treno per Firenze parte: la Toscana è aperta.",
+        B1: "Il treno per Roma parte: il Lazio è aperto.", B2: "Hai finito il Lazio: la Campania arriverà presto." }[r]}</p><p><a class="btn" href="#italia">Alla mappa</a></p>`
       : `<p>Riprova domani. Le domande sbagliate:</p><ul class="plain">${answers.filter((a) => !a.correct).map((a) => {
           const t = TOWNS.get(ITEMS.get(a.item)!.town)!;
           return `<li><a href="#citta/${encodeURIComponent(t.id)}/lezione">${esc(t.label)}</a></li>`; }).join("")}</ul>`}</div>`;
@@ -579,18 +748,34 @@ async function meet(v: Visitor) {
         <p><button class="btn" data-act="close">Grazie, folletto</button> ${segnala(`proverbio ${p.id}`)}</p>`;
     }));
   } else if (v === "fata") {
+    // a story at the player's level, two questions, then a hint for the weakest town
+    const story = pickOf(STORIE.filter((x) => x.level === currentRegion(s)), s.stories);
     const open = [...TOWNS.values()].filter((t) => isOpen(s, t.id) && !isFlagged(s, t.id));
     const weakest = (open.length ? open : [...TOWNS.values()].filter((t) => isOpen(s, t.id)))
       .sort((a, b) => a.cards.filter((c) => recalled(s, c)).length / a.cards.length - b.cards.filter((c) => recalled(s, c)).length / b.cards.length)[0];
     const card = weakest.cards.map((c) => CARDS.get(c)!).find((c) => c.kind === "trappola") ?? CARDS.get(weakest.cards[0])!;
-    const d = dialog(`<h2 class="p">LA FATA</h2><p>Ho visto che <b>${esc(weakest.label)}</b> ti dà ancora fastidio. Ricorda:</p>
+    const d = dialog(`<h2 class="p">LA FATA · ${esc(story.titolo.toUpperCase())}</h2>
+      <div class="card story"><p>${esc(story.testo)}</p></div><div id="qs"></div>`);
+    const box = $("#qs", d);
+    const answers: boolean[] = [];
+    for (const [i, dq] of story.domande.entries()) {
+      const opts = shuffle(dq.o.map((o, k) => ({ o, right: k === 0 })));
+      box.innerHTML = `<p class="small">Domanda ${i + 1} di ${story.domande.length}</p><p class="q">${esc(dq.q)}</p>
+        <div class="opts col">${opts.map((x, k) => `<button class="btn opt" data-k="${k}">${esc(x.o)}</button>`).join("")}</div>`;
+      const pick = await new Promise<{ o: string; right: boolean }>((res) =>
+        box.querySelectorAll<HTMLButtonElement>(".opt").forEach((b) => b.addEventListener("click", () => {
+          box.querySelectorAll<HTMLButtonElement>(".opt").forEach((x, k) => { x.disabled = true; if (opts[k].right) x.classList.add("right"); });
+          if (!opts[Number(b.dataset.k)].right) b.classList.add("wrong");
+          setTimeout(() => res(opts[Number(b.dataset.k)]), 900);
+        })));
+      answers.push(pick.right);
+    }
+    try { await send({ t: "story", id: story.id, answers }); } catch { return; }
+    box.innerHTML = `<p>${answers.filter(Boolean).length} risposte giuste su ${answers.length}.</p>
+      <p>E un consiglio: <b>${esc(weakest.label)}</b> ti dà ancora fastidio. Ricorda:</p>
       <div class="card">${card.back}</div>
-      <p><button class="btn" data-act="hint">Grazie, fata</button> <a class="link" href="#citta/${encodeURIComponent(weakest.id)}">Vai a ${esc(weakest.label)}</a></p>
-      <p class="small">Le storie della fata arriveranno con la Toscana.</p>`);
-    d.querySelector('[data-act="hint"]')!.addEventListener("click", async () => {
-      try { await send({ t: "hint", town: weakest.id }); } catch { /* shown */ }
-      closeDialog();
-    });
+      <p><button class="btn" data-act="close">Grazie, fata</button> <a class="link" href="#citta/${encodeURIComponent(weakest.id)}">Vai a ${esc(weakest.label)}</a>
+        ${segnala(`storia ${story.id}`)}</p>`;
   } else if (v === "lupo") {
     wolf();
   } else if (v === "sibilla") {
@@ -746,7 +931,11 @@ document.addEventListener("click", (e) => {
 });
 
 async function boot() {
-  ICONS = Object.fromEntries([...Object.entries(px.GEM_SPRITE).map(([k, v]) => [k, px.icon(v)]), ["coin", px.icon(px.COIN)]]);
+  ICONS = Object.fromEntries([
+    ...Object.entries(px.GEM_SPRITE).map(([k, v]) => [k, px.icon(v)]), ["coin", px.icon(px.COIN)],
+    ...Object.entries(px.SOUVENIR).map(([k, v]) => ["s-" + k, px.icon(v, 6)]),
+    ["o-zaino", px.icon(px.BACKPACK_ICON, 6)], ["o-bicicletta", px.icon(px.BIKE, 4)], ["o-vespa", px.icon(px.VESPA, 4)], ["o-chiavi", px.icon(px.KEYS, 8)],
+  ]);
   try {
     await api("/api/me");
     game = new AccountGame();

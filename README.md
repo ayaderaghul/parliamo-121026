@@ -33,24 +33,34 @@ test/                         vitest: API against a real Postgres, progress rule
 ## Il Viaggio (`/viaggio`)
 
 An 8-bit trip down Italy on the same account: each CEFR level is a region,
-each rule a town. Phase 1 is playable: **Veneto (A1)** and **Emilia-Romagna
-(A2)**, 54 towns. Design: the "Il Viaggio game design" doc.
+each rule a town. Playable: **Veneto (A1)**, **Emilia-Romagna (A2)**,
+**Toscana (B1)** and **Lazio (B2)**, 78 towns. Campania and Sicilia (C1, C2)
+are still in the fog. Design: the "Il Viaggio game design" doc.
 
 - **A town** = Lezione (the Parliamo lesson, as is) → Mattoni (cards cut from
   the lesson at load time: rule, forms table, fill-in, traps) → Quiz against
-  the town's Errore monster (3 questions from the bank, win at 2). Every card
-  recalled and the quiz won = the flag. Cards come back by spaced repetition;
-  a flagged town with a card due grows weeds.
+  the town's Errore monster (3 questions from the bank, win at 2) → in B1 and
+  B2, a Scena: a 4-turn conversation where the rule is needed. Every card
+  recalled, the quiz won and the scene played through = the flag. Cards come
+  back by spaced repetition; a flagged town with a card due grows weeds.
+  Scenes speak of the player in the feminine or masculine (`{o|a}` in the
+  text), as the player chooses.
 - **The station**: 75% of the region's rules flagged (weighted, as in the
   test), then 12 questions, pass at 9. A fail waits until tomorrow.
 - **Gems → gold** at the Cambiavalute: Rubino 5 (a due card recalled),
-  Pietra di luna 8, Smeraldo 3, Perla 3, Zaffiro 2 (a right quiz answer),
-  Goccia 1 (rain). Times ×1 in A1, ×1.25 in A2. Gold never buys a flag.
+  Pietra di luna 8, Smeraldo 3 (a right turn in a scene, a fairy question),
+  Perla 3, Zaffiro 2 (a right quiz answer), Goccia 1 (rain). Times ×1 in A1,
+  ×1.25 A2, ×1.5 B1, ×1.75 B2.
+- **The bottega**: an outfit per title (zaino, bicicletta, Vespa, chiavi di
+  casa, worn by the hero on every map), two souvenirs per region for the
+  album, and in quizzes an *aiutino* for 10 gold that removes two wrong
+  options; that answer pays no gem. Gold never buys a flag, a level or an exam.
 - **The sky is real**: the player's own place (asked on the first visit, or a
   city picked), one visitor a day, chosen the first time the day is asked for:
   moon ≥98% the Lupo (60-second quiz), ≤2% the Sibilla (a tip or a shortcut),
   then fog the Folletto (a proverb), rain a shower of gems (20 a day), clouds
-  the Fata (a hint for the weakest town).
+  the Fata (a story at the player's level, two questions, and a hint for the
+  weakest town).
 
 ```
 src/game/      shared by browser and server, pure
@@ -58,6 +68,9 @@ src/game/      shared by browser and server, pure
   rules.ts       the reducer: every reward and every refusal
   cielo.ts       weather codes → sky, the moon, 0.1° cells, Italian days
   testi.ts       the new Italian: proverbs and tips (shipped as generated)
+  scene.ts       24 conversations, one per B1/B2 rule (shipped as generated)
+  storie.ts      the fairy's stories, 6 per level A1–B2 (shipped as generated)
+  bottega.ts     outfits, souvenirs, the hint price
 src/server/
   outside.ts     the only door to public services, with their etiquette
   meteo.ts       Open-Meteo → MET Norway → last reading → clear; city search

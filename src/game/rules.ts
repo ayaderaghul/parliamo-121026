@@ -6,7 +6,8 @@
  * browser (for instant feedback and for guests) and on the server (which
  * replays the log and refuses an event the rules don't allow).
  */
-import { CARDS, CONSIGLI, ITEMS, PLAYABLE, PROVERBI, REGIONS, TOWNS, townsIn, type RegionId } from "./content";
+import { BOTTEGA, CARDS, CONSIGLI, ITEMS, PLAYABLE, PROVERBI, REGIONS, STORIE, TOWNS, sceneOf, townsIn, type RegionId } from "./content";
+import { HINT_PRICE } from "./bottega";
 import { addDays, dayOf } from "./cielo";
 
 // ── gems and gold ────────────────────────────────────────────────────────────
@@ -33,7 +34,12 @@ export const STAR_XP = [150, 400, 800];
 // ── events ───────────────────────────────────────────────────────────────────
 
 export type Grade = "no" | "quasi" | "si";
-export interface Answer { item: string; correct: boolean }
+export interface Answer {
+  item: string;
+  correct: boolean;
+  /** bought for HINT_PRICE gold: two wrong options removed, no gem for this answer */
+  hint?: boolean;
+}
 export type Visitor = "lupo" | "sibilla" | "folletto" | "pioggia" | "fata";
 
 export type EventBody =
@@ -48,7 +54,11 @@ export type EventBody =
   | { t: "wolf"; answers: Answer[] }
   | { t: "tip"; id: string }
   | { t: "shortcut"; town: string; answers: Answer[] }
-  | { t: "import"; towns: string[] };
+  | { t: "import"; towns: string[] }
+  | { t: "scene"; town: string; answers: boolean[] }
+  | { t: "story"; id: string; answers: boolean[] }
+  | { t: "buy"; item: string }
+  | { t: "wear"; item: string };
 
 export type GameEvent = EventBody & {
   /** ISO time, set by whoever stores the event (the server, for accounts) */
@@ -62,13 +72,20 @@ const FIELDS: Record<EventBody["t"], string[]> = {
   lesson: ["town"], card: ["card", "grade"], battle: ["town", "answers"], exam: ["region", "answers"],
   exchange: [], drop: [], proverb: ["id", "correct"], hint: ["town"], wolf: ["answers"], tip: ["id"],
   shortcut: ["town", "answers"], import: ["towns"],
+  scene: ["town", "answers"], story: ["id", "answers"], buy: ["item"], wear: ["item"],
 };
+/** events whose answers are plain right/wrong flags rather than quiz items */
+const FLAG_ANSWERS = new Set(["scene", "story"]);
 export function normalize(b: any): EventBody {
   const keys = FIELDS[b?.t as EventBody["t"]];
   if (!keys) throw new RuleError("Evento sconosciuto.");
   const out: any = { t: b.t };
   for (const k of keys) {
-    if (k === "answers") out.answers = Array.isArray(b.answers) ? b.answers.map((a: any) => ({ item: a?.item, correct: a?.correct })) : b.answers;
+    if (k === "answers" && Array.isArray(b.answers)) {
+      out.answers = FLAG_ANSWERS.has(b.t)
+        ? b.answers.map((a: any) => a)
+        : b.answers.map((a: any) => (a?.hint === true ? { item: a?.item, correct: a?.correct, hint: true } : { item: a?.item, correct: a?.correct }));
+    }
     else out[k] = b[k];
   }
   return out;
@@ -76,7 +93,7 @@ export function normalize(b: any): EventBody {
 
 /** Which visitor allows which event. */
 export const NEEDS: Partial<Record<EventBody["t"], Visitor>> = {
-  drop: "pioggia", proverb: "folletto", hint: "fata", wolf: "lupo", tip: "sibilla", shortcut: "sibilla",
+  drop: "pioggia", proverb: "folletto", hint: "fata", story: "fata", wolf: "lupo", tip: "sibilla", shortcut: "sibilla",
 };
 
 // ── state ────────────────────────────────────────────────────────────────────
@@ -104,6 +121,13 @@ export interface GameState {
   visited: Visitor[];
   tips: string[];
   proverbs: string[];
+  /** towns whose scene has been played through, and the last day each paid */
+  scenes: Record<string, true>;
+  sceneOn: Record<string, string>;
+  stories: string[];
+  owned: string[];
+  /** the outfit the hero wears, if any */
+  wearing: string | null;
   events: number;
   /** replayed events that no longer apply to the current content */
   skipped: number;
@@ -114,7 +138,7 @@ export interface GameState {
 export const emptyGame = (): GameState => ({
   xp: 0, xpBy: {}, gold: 0, gems: {}, lessons: {}, quizWon: {}, imported: {}, importDone: false,
   cards: {}, answeredOn: {}, passed: [], examFailedOn: {}, day: "", drops: 0, visited: [],
-  tips: [], proverbs: [], events: 0, skipped: 0, lastAt: "", last: { xp: 0, gems: {}, gold: 0, notes: [] },
+  tips: [], proverbs: [], scenes: {}, sceneOn: {}, stories: [], owned: [], wearing: null, events: 0, skipped: 0, lastAt: "", last: { xp: 0, gems: {}, gold: 0, notes: [] },
 });
 
 export class RuleError extends Error {}
@@ -123,8 +147,12 @@ const no = (msg: string): never => { throw new RuleError(msg); };
 // ── derived facts ────────────────────────────────────────────────────────────
 
 export const recalled = (s: GameState, card: string) => (s.cards[card]?.box ?? 0) >= 1;
-export const isFlagged = (s: GameState, town: string) =>
-  !!s.imported[town] || (!!s.quizWon[town] && TOWNS.get(town)!.cards.every((c) => recalled(s, c)));
+/** The flag: every card recalled, the quiz won, and the scene played through where the town has one. */
+export const isFlagged = (s: GameState, town: string) => {
+  if (s.imported[town]) return true;
+  const t = TOWNS.get(town)!;
+  return !!s.quizWon[town] && t.cards.every((c) => recalled(s, c)) && (!t.scene || !!s.scenes[town]);
+};
 
 export const isUnlocked = (s: GameState, r: RegionId) => {
   const i = PLAYABLE.indexOf(r);
@@ -194,14 +222,19 @@ export function step(s: GameState, e: GameEvent, check?: Check): GameState {
     s.xp += n; s.xpBy[where] = (s.xpBy[where] ?? 0) + n; r.xp += n;
   };
   const town = (id: string) => (TOWNS.has(id) ? id : no("Città sconosciuta."));
-  const answers = (a: Answer[], allowed: (it: string) => boolean, n: [number, number]) => {
+  const answers = (a: Answer[], allowed: (it: string) => boolean, n: [number, number], hints = false) => {
     if (!Array.isArray(a) || a.length < n[0] || a.length > n[1]) no("Numero di risposte non valido.");
     const seen = new Set<string>();
     for (const x of a) {
       if (!ITEMS.has(x.item) || !allowed(x.item) || seen.has(x.item) || typeof x.correct !== "boolean") no("Domanda non valida.");
+      if (x.hint && !hints) no("Qui gli aiutini non si possono usare.");
       seen.add(x.item);
     }
     return a.filter((x) => x.correct).length;
+  };
+  const flags = (a: boolean[], n: number) => {
+    if (!Array.isArray(a) || a.length !== n || a.some((x) => typeof x !== "boolean")) no("Numero di risposte non valido.");
+    return a.filter(Boolean).length;
   };
   const visit = (v: Visitor) => {
     if (check && check.visitor !== v) no("Oggi questo visitatore non c'è.");
@@ -247,9 +280,16 @@ export function step(s: GameState, e: GameEvent, check?: Check): GameState {
       const t = town(e.town);
       if (check && !isOpen(s, t)) no("Questa città non è ancora aperta.");
       const items = new Set(TOWNS.get(t)!.items);
-      const right = answers(e.answers, (i) => items.has(i), [3, 3]);
+      const right = answers(e.answers, (i) => items.has(i), [3, 3], true);
+      const hints = e.answers.filter((a) => a.hint).length;
+      if (hints) {
+        if (s.gold < hints * HINT_PRICE) no("Non hai abbastanza oro per gli aiutini.");
+        s.gold -= hints * HINT_PRICE;
+        r.gold -= hints * HINT_PRICE;
+      }
       for (const a of e.answers) {
-        if (a.correct && s.answeredOn[a.item] !== day) { gem("zaffiro", 1, region(t)); xp(5, region(t)); }
+        // a hinted answer pays no gem; the same question twice in a day pays nothing
+        if (a.correct && !a.hint && s.answeredOn[a.item] !== day) { gem("zaffiro", 1, region(t)); xp(5, region(t)); }
         s.answeredOn[a.item] = day;
       }
       if (right >= 2) {
@@ -343,6 +383,47 @@ export function step(s: GameState, e: GameEvent, check?: Check): GameState {
       // the player starts in the region where the test stopped
       for (const reg of PLAYABLE) if (isUnlocked(s, reg) && coverage(s, reg) >= COVERAGE_FOR_EXAM && !s.passed.includes(reg)) s.passed.push(reg);
       xp(5 * e.towns.length, "A1");
+      break;
+    }
+
+    case "scene": {
+      const t = town(e.town);
+      const sc = sceneOf(t) ?? no("Questa città non ha una scena.");
+      if (check && !isOpen(s, t)) no("Questa città non è ancora aperta.");
+      const right = flags(e.answers, sc.turni.length);
+      if (s.sceneOn[t] !== day) { gem("smeraldo", right, region(t)); xp(25, region(t)); } // pays once a day
+      s.sceneOn[t] = day;
+      if (!s.scenes[t]) r.notes.push("scena");
+      s.scenes[t] = true; // played through, whatever the score: the flag needs it played, not perfect
+      break;
+    }
+
+    case "story": {
+      visit("fata");
+      const st = STORIE.find((x) => x.id === e.id) ?? no("Storia sconosciuta.");
+      const right = flags(e.answers, st.domande.length);
+      gem("smeraldo", right, region());
+      xp(10, region());
+      if (!s.stories.includes(st.id)) s.stories.push(st.id);
+      break;
+    }
+
+    case "buy": {
+      const a = BOTTEGA.find((x) => x.id === e.item) ?? no("Articolo sconosciuto.");
+      if (s.owned.includes(a.id)) no("Ce l'hai già.");
+      if (check && !isUnlocked(s, a.region as RegionId)) no("Si compra solo arrivati in quella regione.");
+      if (s.gold < a.price) no("Non hai abbastanza oro.");
+      s.gold -= a.price;
+      r.gold = -a.price;
+      s.owned.push(a.id);
+      if (a.kind === "outfit") s.wearing = a.id;
+      break;
+    }
+
+    case "wear": {
+      if (e.item !== "" && !s.owned.includes(e.item)) no("Non ce l'hai.");
+      if (e.item !== "" && BOTTEGA.find((x) => x.id === e.item)?.kind !== "outfit") no("Non si indossa.");
+      s.wearing = e.item || null;
       break;
     }
 
