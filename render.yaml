@@ -17,3 +17,5 @@ services:
         sync: false           # you paste the Neon connection string in the dashboard
       - key: REGISTRATION_OPEN
         value: "false"        # "true" reopens sign-ups; existing accounts always sign in
+      - key: NOMINATIM_ENABLED
+        value: "true"         # "false" switches OpenStreetMap search off, as its policy may require

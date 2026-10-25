@@ -12,6 +12,8 @@ import {
   setSession,
 } from "./auth";
 import * as repo from "./repo";
+import { mountViaggio } from "./viaggio";
+import type { Meteo } from "./meteo";
 import { isSkill, replay, ReplayError, type TestEvent } from "../shared/progress";
 
 export interface AppOptions {
@@ -23,6 +25,12 @@ export interface AppOptions {
   publicDir?: string;
   /** false: nobody can create an account; existing accounts still sign in */
   registrationOpen: boolean;
+  /** Il Viaggio's weather and places; omitted in tests that don't need them */
+  meteo?: Meteo;
+  /** id of this build, for /api/version */
+  buildId?: string;
+  /** development only: lets ?meteo=… force the sky to test the visitors */
+  allowForcing?: boolean;
 }
 
 // ── validation ──────────────────────────────────────────────────────────────
@@ -80,7 +88,7 @@ const guestTest = (t: any, wantDone: boolean): repo.GuestTest => {
 
 // ── app ─────────────────────────────────────────────────────────────────────
 
-export function createApp({ db, secret, secure, publicDir, registrationOpen }: AppOptions) {
+export function createApp({ db, secret, secure, publicDir, registrationOpen, meteo, buildId = "dev", allowForcing = false }: AppOptions) {
   const app = express();
   app.set("trust proxy", 1); // Render terminates TLS in front of us
   app.disable("x-powered-by");
@@ -205,6 +213,8 @@ export function createApp({ db, secret, secure, publicDir, registrationOpen }: A
     res.json(await repo.loadProgress(db, req.userId!));
   });
 
+  if (meteo) mountViaggio(app, { db, auth, meteo, buildId, allowForcing });
+
   app.use("/api", (_req, res) => res.status(404).json({ error: "Endpoint inesistente." }));
 
   // ── front end ─────────────────────────────────────────────────────────────
@@ -214,8 +224,14 @@ export function createApp({ db, secret, secure, publicDir, registrationOpen }: A
     // The page itself is always revalidated, so a deploy is seen on the next load.
     app.use("/fonts", express.static(join(publicDir, "fonts"), { immutable: true, maxAge: "365d" }));
     app.use("/fonts", (_req, res) => res.status(404).end()); // never the page instead of a font
-    app.use(express.static(publicDir, { index: "index.html", maxAge: 0 }));
-    app.get("/{*any}", (_req, res) => res.sendFile("index.html", { root: publicDir }));
+    app.use("/assets", express.static(join(publicDir, "assets"), { immutable: true, maxAge: "365d" }));
+    app.use("/assets", (_req, res) => res.status(404).end());
+    // Pages keep a fixed name and are revalidated on every load (304 when unchanged).
+    const page = (file: string) => (_req: Request, res: Response) =>
+      res.sendFile(file, { root: publicDir, headers: { "Cache-Control": "no-cache" } });
+    app.get(["/viaggio", "/viaggio/"], page("viaggio.html"));
+    app.use(express.static(publicDir, { index: false, maxAge: 0 }));
+    app.get("/{*any}", page("index.html"));
   }
 
   // Express 5 forwards rejected promises here, so async routes need no try/catch.

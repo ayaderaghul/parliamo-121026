@@ -17,7 +17,7 @@ const app = createApp({ db, secret: "x".repeat(40), secure: false, registrationO
 const closed = createApp({ db, secret: "x".repeat(40), secure: false, registrationOpen: false });
 
 beforeAll(async () => {
-  await db.query("drop table if exists practice, tests, users cascade");
+  await db.query("drop table if exists game_events, game_settings, game_days, weather_cache, search_cache, place_names, service_state, segnalazioni, practice, tests, users cascade");
   await db.query(SCHEMA);
 });
 afterAll(() => db.end());

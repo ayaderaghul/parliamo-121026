@@ -1,0 +1,147 @@
+<title>Il Viaggio · Parliamo</title>
+<meta name="description" content="Un viaggio a 8 bit per l'Italia, una regola di grammatica alla volta: Veneto (A1) ed Emilia-Romagna (A2).">
+<meta name="theme-color" content="#1d2b53">
+<!-- Fonts are served from our own server (scripts/build.mjs): no visitor's IP goes to a font CDN. -->
+<style>/*__FONTS__*/</style>
+<style>
+:root {
+  --k: #000; --n: #1d2b53; --v: #7e2553; --d: #008751; --o: #ab5236; --a: #5f574f; --l: #c2c3c7; --w: #fff1e8;
+  --r: #ff004d; --e: #ffa300; --y: #ffec27; --g: #00e436; --b: #29adff; --u: #83769c; --p: #ff77a8; --f: #ffccaa;
+  --pixel: "Pixelify Sans", ui-monospace, monospace;
+  --text: "Titillium Web", "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { background: var(--n); }
+body { margin: 0; background: var(--n); color: var(--w); font: 400 1.0625rem/1.55 var(--text); min-height: 100vh; display: flex; flex-direction: column; }
+a { color: var(--y); }
+h1, h2 { font-family: var(--pixel); font-weight: 700; letter-spacing: .02em; margin: .6em 0 .3em; line-height: 1.15; }
+h1 { font-size: 1.9rem; } h1 small { font-size: .95rem; color: var(--l); font-weight: 400; }
+h2 { font-size: 1.3rem; }
+.small, small { font-size: .875rem; color: var(--l); }
+img.gem, canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+img.gem { vertical-align: -2px; margin-right: 3px; }
+
+/* pixel borders: a stepped double edge drawn with shadows */
+.btn, .regcard, .card, .dlgbox, .battle, .bagbox, .lesson, .visit {
+  border: 0; box-shadow: 0 0 0 3px var(--w), 0 0 0 6px var(--k);
+}
+.btn { font: 700 1rem/1 var(--pixel); background: var(--v); color: var(--w); padding: .7em 1em; margin: .35em .35em .35em 0;
+  cursor: pointer; min-height: 44px; text-decoration: none; display: inline-flex; align-items: center; gap: .4em; }
+.btn:hover { background: var(--r); }
+.btn:focus-visible, a:focus-visible, button:focus-visible, canvas:focus-visible { outline: 3px solid var(--y); outline-offset: 5px; }
+.btn:disabled { opacity: .55; cursor: default; }
+.btn.no { background: var(--r); } .btn.quasi { background: var(--o); } .btn.si { background: var(--d); }
+.link { background: none; border: 0; color: var(--y); font: inherit; text-decoration: underline; cursor: pointer; padding: .3em 0; min-height: 32px; }
+
+/* HUD */
+#hud { position: sticky; top: 0; z-index: 5; background: var(--k); border-bottom: 3px solid var(--a); display: flex; flex-wrap: wrap;
+  align-items: center; gap: .3em 1.1em; padding: .45em 16px; font: 400 .95rem/1.2 var(--pixel); }
+#hud .brand { color: var(--b); font-weight: 700; text-decoration: none; font-size: 1.05rem; }
+#hud .stars { color: var(--y); } #hud .stars i { color: var(--a); font-style: normal; }
+#hud .lvl b { color: var(--b); font-weight: 400; margin-left: .3em; }
+#hud .bag { display: flex; gap: .75em; color: var(--w); text-decoration: none; flex-wrap: wrap; }
+#hud .sky { margin-left: auto; background: none; border: 0; color: var(--w); font: inherit; cursor: pointer; text-align: right; min-height: 40px; }
+#hud .sky b { color: var(--b); font-weight: 400; } #hud .sky small { display: block; font-size: .75rem; }
+#hud .blocked { flex-basis: 100%; color: var(--r); font-weight: 700; }
+#banner { background: var(--y); color: var(--k); font: 700 1rem var(--pixel); text-align: center; padding: .5em 16px; }
+#banner .btn { margin-left: .8em; }
+
+main { flex: 1; width: 100%; max-width: 1000px; margin: 0 auto; padding: 8px 16px 32px; }
+.crumbs { font: .9rem var(--pixel); color: var(--l); margin-top: .6em; } .crumbs a { color: var(--l); }
+canvas { display: block; width: 100%; height: auto; background: var(--k); }
+
+/* overworld */
+.world { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 20px; align-items: start; margin-top: 12px; }
+.side h1 { margin-top: 0; }
+.regcard { display: block; background: var(--k); color: var(--w); text-decoration: none; padding: .8em 1em; margin: 14px 6px 18px; }
+.regcard b { font-family: var(--pixel); color: var(--y); } .regcard span { font: .9rem var(--pixel); color: var(--l); margin-left: .4em; }
+.regcard small { display: block; margin-top: .2em; }
+.regcard.locked b { color: var(--l); } .regcard.locked { opacity: .7; }
+.bar { display: block; height: 10px; background: var(--a); margin-top: .5em; } .bar i { display: block; height: 100%; background: var(--g); }
+.ok { color: var(--g); font-family: var(--pixel); }
+.visit { background: var(--k); padding: .7em 1em; margin: 14px 6px; font-family: var(--pixel); }
+
+/* region */
+.regione canvas { margin-top: 8px; cursor: pointer; }
+.tip { font: .95rem var(--pixel); color: var(--y); min-height: 1.4em; margin: .4em 0; }
+.regionbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5em 1em; }
+.regionbar .bar { width: 160px; margin: 0; }
+.towns { list-style: none; padding: 0; columns: 2 280px; column-gap: 24px; }
+.towns li { break-inside: avoid; padding: .3em 0 .3em 1.4em; position: relative; }
+.towns li::before { content: ""; position: absolute; left: 0; top: .65em; width: 10px; height: 10px; background: var(--r); }
+.towns .t-locked { color: var(--l); } .towns .t-locked::before { background: var(--a); }
+.towns .t-flag::before { background: var(--g); } .towns .t-weeds::before { background: var(--y); }
+.towns small { display: block; }
+
+/* town */
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: .8em 0 1.2em; border-bottom: 3px solid var(--a); }
+.tabs a { font: 700 1rem var(--pixel); color: var(--l); text-decoration: none; padding: .55em .9em; min-height: 44px; display: inline-flex; align-items: center; }
+.tabs a[aria-selected="true"] { color: var(--k); background: var(--y); }
+.tabs a.done { color: var(--g); } .tabs a.done[aria-selected="true"] { color: var(--k); }
+.flag { font: .9rem var(--pixel); background: var(--d); padding: .15em .5em; vertical-align: middle; }
+.lesson, .card, .bagbox { background: var(--w); color: var(--n); padding: 1.1em 1.3em; margin: 6px; }
+.lesson a, .card a, .bagbox a { color: var(--v); }
+.lesson table, .card table, .bagbox table { border-collapse: collapse; margin: .6em 0; display: block; overflow-x: auto; }
+.lesson td, .lesson th, .card td, .card th, .bagbox td, .bagbox th { border: 1px solid var(--l); padding: .25em .6em; text-align: left; }
+.lesson code { font-size: .85em; }
+.card header { display: flex; flex-wrap: wrap; gap: .3em 1em; font-family: var(--pixel); color: var(--v); border-bottom: 2px dotted var(--l); padding-bottom: .4em; }
+.card .pay { margin-left: auto; color: var(--r); }
+.card .front { font-size: 1.1rem; } .card .ex { font-size: 1.25rem; }
+.card .back { border-top: 2px dotted var(--l); margin-top: .8em; padding-top: .6em; }
+.card .small, .bagbox .small { color: var(--a); }
+.card .link, .bagbox .link { color: var(--v); }
+.card.done { font-family: var(--pixel); }
+.battle { background: var(--k); padding: 1em 1.2em; margin: 6px; }
+.battle .vs { font-family: var(--pixel); } .hp { color: var(--r); font-size: 1.6rem; letter-spacing: .1em; margin: .2em 0; }
+.q { font-size: 1.2rem; margin: .4em 0 .6em; }
+.opts { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.opt { background: var(--n); font-family: var(--text); font-weight: 600; }
+.opt.right { background: var(--d); } .opt.wrong { background: var(--r); }
+.monsterline { margin-top: .8em; padding: .6em .8em; background: var(--v); }
+.monsterline em { color: var(--f); }
+.result.won h2 { color: var(--g); } .result.lost h2 { color: var(--e); }
+.gold { color: var(--y); }
+.plain { padding-left: 1.2em; } .plain li { margin: .3em 0; }
+
+/* dialogs */
+dialog { border: 0; padding: 0; background: transparent; color: var(--w); max-width: min(620px, calc(100vw - 32px)); width: 100%; }
+dialog::backdrop { background: rgba(0, 0, 0, .7); }
+.dlgbox { background: var(--k); padding: 1.2em 1.4em; margin: 8px; }
+.dlgbox h2 { margin-top: 0; } .dlgbox h2.g { color: var(--g); } .dlgbox h2.p { color: var(--p); } .dlgbox h2.l { color: var(--l); } .dlgbox h2.u { color: var(--u); }
+.dlgbox .card { margin: 10px 6px; }
+.big { font-size: 1.3rem; font-weight: 600; }
+.timer { font-family: var(--pixel); font-size: 1.2rem; color: var(--y); }
+label { display: block; margin: .8em 0 .3em; font-family: var(--pixel); }
+input, textarea { font: inherit; width: 100%; padding: .55em .7em; background: var(--w); color: var(--n); border: 0; min-height: 44px; }
+.row { display: flex; gap: 8px; align-items: center; } .row .btn { margin: 0 0 0 6px; flex: none; }
+.quick { font-family: var(--pixel); }
+
+#toast { position: fixed; left: 50%; bottom: 20px; transform: translate(-50%, 24px); opacity: 0; visibility: hidden; background: var(--k); color: var(--w);
+  padding: .7em 1.1em; font: 1rem var(--pixel); box-shadow: 0 0 0 3px var(--y); transition: transform .2s, opacity .2s, visibility .2s;
+  z-index: 20; max-width: calc(100vw - 32px); }
+#toast.on { transform: translate(-50%, 0); opacity: 1; visibility: visible; } #toast .err { color: var(--p); }
+
+footer { font-size: .8rem; color: var(--l); padding: 14px 16px 22px; text-align: center; border-top: 3px solid var(--a); }
+footer a { color: var(--l); }
+
+@media (max-width: 760px) {
+  .world { grid-template-columns: 1fr; }
+  h1 { font-size: 1.55rem; }
+  #hud .sky { margin-left: 0; text-align: left; }
+}
+@media (prefers-reduced-motion: reduce) { #toast { transition: none; } }
+</style>
+<!--BODY-->
+<header id="hud" aria-label="Il tuo viaggio"></header>
+<div id="banner" hidden role="status">Nuova versione: <button class="btn" data-act="reload">ricarica</button></div>
+<main id="view" tabindex="-1"></main>
+<dialog id="dlg" aria-label="Incontro"></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+<footer>
+  <a href="/">← Parliamo</a> ·
+  Meteo: <a href="https://open-meteo.com/" rel="noopener">Open-Meteo.com</a> e <a href="https://www.met.no/en" rel="noopener">MET Norway</a> (CC BY 4.0), dati semplificati in tipi di cielo.
+  Luoghi: GeoNames, © <a href="https://www.openstreetmap.org/copyright" rel="noopener">OpenStreetMap contributors</a> (ODbL).
+  <button class="link small" data-act="segnala" data-where="pagina">Segnala un errore</button>
+</footer>
+<!--SCRIPT-->

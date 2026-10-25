@@ -208,6 +208,9 @@ function renderTestBox() {
       in una decina di minuti, e puoi interromperlo quando vuoi.</p>
       <div class="actions"><button class="btn" data-act="newtest">Fai il test diagnostico</button></div>`);
   }
+  parts.push(`<p class="viaggio"><strong>Preferisci giocare?</strong> Nel Viaggio le regole A1 e A2 diventano
+    città del Veneto e dell'Emilia-Romagna, con gemme, mostri e il meteo vero.</p>
+    <div class="actions"><a class="btn viaggio" href="/viaggio">Il Viaggio</a></div>`);
   box.innerHTML = parts.join("");
 }
 
