@@ -21,6 +21,7 @@ import {
 import { api, ApiError } from "../client/store";
 import { AccountGame, GuestGame, type Game, type Place, type Today } from "./store";
 import * as px from "./pixel";
+import * as S from "./suoni";
 
 declare const BUILD_ID: string;
 
@@ -70,12 +71,23 @@ function rewardLine(s: GameState) {
 
 async function send(body: Parameters<Game["send"]>[0]) {
   try {
+    const flagsBefore = [...TOWNS.keys()].filter((t) => isFlagged(game.state, t)).length;
     const s = await game.send(body);
+    const flagsAfter = [...TOWNS.keys()].filter((t) => isFlagged(s, t)).length;
+    const gems = Object.values(s.last.gems).some((n) => (n ?? 0) > 0);
+    if (s.last.notes.includes("promosso")) S.play("levelUp");
+    else if (s.last.notes.includes("bocciato") || s.last.notes.includes("perso")) S.play("fail");
+    else if (flagsAfter > flagsBefore) S.play("flag");
+    else if (body.t === "buy") S.play("buy");
+    else if (body.t === "drop") S.play("drop");
+    else if (s.last.gold > 0) S.play("coin");
+    else if (gems) S.play("gem");
     const line = rewardLine(s);
     if (line) toast(line);
     renderHud();
     return s;
   } catch (e) {
+    S.play("wrong");
     toast(`<span class="err">${esc(e instanceof Error ? e.message : "Errore.")}</span>`);
     throw e;
   }
@@ -103,6 +115,10 @@ function renderHud() {
       <b>${sky ? SKY_WORD[sky.sky] : "…"}</b> ${esc(place)}
       ${sky?.at ? `<small>aggiornato alle ${hhmm(sky.at)}</small>` : ""}
     </button>
+    <span class="audio">
+      <button class="link" data-act="sfx" aria-pressed="${S.sfxEnabled()}" title="Effetti sonori">SUONI ${S.sfxEnabled() ? "SÌ" : "NO"}</button>
+      <button class="link" data-act="music" aria-pressed="${S.musicEnabled()}" title="Musica">MUSICA ${S.musicEnabled() ? "SÌ" : "NO"}</button>
+    </span>
     ${sky?.blocked.length ? `<span class="blocked" role="status">${sky.blocked.map(esc).join(" · ")}</span>` : ""}`;
 }
 
@@ -115,6 +131,8 @@ function route() {
   const v = $("#view");
   v.className = "";
   const isRegion = (x: string | undefined): x is RegionId => (PLAYABLE as string[]).includes(x ?? "");
+  const town = TOWNS.get(decodeURIComponent(arg ?? ""));
+  S.setRegion(isRegion(arg) ? arg : view === "citta" && town ? town.region : currentRegion(game.state));
   if (view === "regione" && isRegion(arg)) return renderRegion(arg);
   if (view === "citta" && TOWNS.has(decodeURIComponent(arg ?? ""))) return renderTown(decodeURIComponent(arg), tab);
   if (view === "stazione" && isRegion(arg)) return renderExam(arg);
@@ -303,6 +321,7 @@ function renderRegion(r: RegionId) {
   (cv as any).token = token;
   draw(0);
   if (!reduced() || raining) anim = requestAnimationFrame(loop);
+  if (raining) S.play("rain");
 
   const toWorld = (ev: MouseEvent) => {
     const b = cv.getBoundingClientRect();
@@ -437,6 +456,7 @@ function cardsPanel(panel: HTMLElement, id: string) {
       <p class="small">Pensa alla risposta, poi gira la carta e sii onesto: solo un SÌ vero aiuta a ricordare. ${segnala(`carta ${card.id}`)}</p>
     </div>`;
   panel.querySelector('[data-act="flip"]')!.addEventListener("click", (e) => {
+    S.play("flip");
     $(".back", panel).hidden = false;
     $(".grade", panel).hidden = false;
     (e.currentTarget as HTMLElement).parentElement!.hidden = true;
@@ -467,6 +487,7 @@ function ask(host: HTMLElement, itemId: string, header = "", canHint?: () => boo
     if (hinted || !canHint!()) return;
     hinted = true;
     btn.disabled = true;
+    S.play("buy");
     const wrong = shuffle(opts.map((x, i) => ({ x, i })).filter(({ x }) => !x.right)).slice(0, 2);
     for (const { i } of wrong) { const b = host.querySelector<HTMLButtonElement>(`.opt[data-i="${i}"]`)!; b.disabled = true; b.style.visibility = "hidden"; }
   });
@@ -478,6 +499,7 @@ function ask(host: HTMLElement, itemId: string, header = "", canHint?: () => boo
         if (opts[i].right) x.classList.add("right");
       });
       if (!pick.right) b.classList.add("wrong");
+      S.play(pick.right ? "right" : "wrong");
       setTimeout(() => resolve(hinted ? { item: itemId, correct: pick.right, hint: true } : { item: itemId, correct: pick.right }), pick.right ? 500 : 1200);
     }));
   });
@@ -498,7 +520,7 @@ async function quizPanel(panel: HTMLElement, id: string) {
   for (let i = 0; i < items.length; i++) {
     const a = await ask($("#q", panel), items[i], `<p class="small">Domanda ${i + 1} di 3</p>`, canHint);
     answers.push(a);
-    if (a.correct) hp--;
+    if (a.correct) { hp--; S.play("hit"); }
     $(".hp", panel).textContent = "♥".repeat(hp) + "♡".repeat(3 - hp);
     if (!a.correct && traps.length) {
       $("#q", panel).insertAdjacentHTML("beforeend", `<div class="monsterline"><b>${esc(monster)}:</b> ${traps[i % traps.length].back}</div>`);
@@ -558,6 +580,7 @@ async function scenePanel(panel: HTMLElement, id: string) {
     const pick = await new Promise<{ o: string; right: boolean }>((res) =>
       reply.querySelectorAll<HTMLButtonElement>(".opt").forEach((b) => b.addEventListener("click", () => res(opts[Number(b.dataset.k)]))));
     answers.push(pick.right);
+    S.play(pick.right ? "right" : "wrong");
     const right = opts.find((x) => x.right)!;
     talk.insertAdjacentHTML("beforeend", `<p class="bubble me ${pick.right ? "good" : "bad"}"><b>Tu:</b> ${esc(pick.o)}</p>`);
     if (!pick.right) talk.insertAdjacentHTML("beforeend", `<p class="bubble fix">Meglio: <b>${esc(right.o)}</b><br><span class="small">${esc(turn.perche)}</span></p>`);
@@ -732,6 +755,7 @@ const pickOf = <T extends { id: string }>(list: T[], have: string[]) => {
 
 async function meet(v: Visitor) {
   const s = game.state;
+  S.play(({ folletto: "elf", fata: "fairy", lupo: "wolf", sibilla: "sibyl", pioggia: "rain" } as const)[v]);
   if (v === "folletto") {
     const p = pickOf(PROVERBI, s.proverbs);
     const opts = shuffle(p.o);
@@ -821,7 +845,14 @@ async function wolf() {
   const answers: Answer[] = [];
   const end = Date.now() + 60_000;
   let combo = 0;
-  const tick = setInterval(() => { const el = document.getElementById("secs"); if (el) el.textContent = String(Math.max(0, Math.ceil((end - Date.now()) / 1000))); }, 250);
+  let lastSec = 60;
+  const tick = setInterval(() => {
+    const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+    const el = document.getElementById("secs");
+    if (el) el.textContent = String(left);
+    if (left !== lastSec && left <= 5 && left > 0) S.play("tick");
+    lastSec = left;
+  }, 250);
   for (const item of items) {
     if (Date.now() >= end || answers.length >= 40) break;
     const a = await Promise.race([ask($("#wq", box), item), new Promise<null>((r) => setTimeout(() => r(null), end - Date.now()))]);
@@ -916,9 +947,12 @@ async function checkVersion() {
 }
 
 document.addEventListener("click", (e) => {
+  S.unlock(); // browsers allow sound only after a tap
   const el = (e.target as HTMLElement).closest<HTMLElement>("[data-act]");
   if (!el) return;
   const act = el.dataset.act;
+  if (act === "sfx") { S.toggleSfx(); return renderHud(); }
+  if (act === "music") { S.toggleMusic(); return renderHud(); }
   if (act === "place") placePicker();
   else if (act === "close") closeDialog();
   else if (act === "meet" && todayInfo?.visitor) meet(todayInfo.visitor);

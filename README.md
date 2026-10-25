@@ -62,6 +62,11 @@ are still in the fog. Design: the "Il Viaggio game design" doc.
   the Fata (a story at the player's level, two questions, and a hint for the
   weakest town).
 
+- **Sounds**, synthesized in the browser with the Web Audio API (no audio
+  files): right and wrong answers, gems, gold, flags, exams, each visitor,
+  rain, the wolf's last seconds. Effects on, music off by default (a short
+  loop per region); both switch from the HUD and are remembered.
+
 ```
 src/game/      shared by browser and server, pure
   content.ts     towns, cards cut from the lessons, quiz ids (hash of the text)
@@ -75,7 +80,7 @@ src/server/
   outside.ts     the only door to public services, with their etiquette
   meteo.ts       Open-Meteo → MET Norway → last reading → clear; city search
   viaggio.ts     /api/viaggio, /api/meteo, /api/luoghi, /api/version, /api/segnala
-src/viaggio/   the page: canvas for the world, HTML for the words
+src/viaggio/   the page: canvas for the world, HTML for the words, suoni.ts for sound
 ```
 
 The game is an event log, like the test: the browser sends what happened
