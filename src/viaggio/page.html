@@ -46,6 +46,10 @@ img.gem { vertical-align: -2px; margin-right: 3px; }
 #hud .blocked { flex-basis: 100%; color: var(--r); font-weight: 700; }
 #hud .audio { display: flex; gap: .8em; } #hud .audio .link { font: .8rem var(--pixel); color: var(--l); min-height: 36px; }
 #hud .audio .link[aria-pressed="true"] { color: var(--y); }
+#waking { background: var(--b); color: var(--k); font: 700 1rem var(--pixel); text-align: center; padding: .5em 16px; }
+#hud .who { font: .85rem var(--pixel); color: var(--g); }
+#hud .btn.small { min-height: 36px; padding: .4em .7em; font-size: .85rem; margin: 0; }
+.err { color: var(--p); min-height: 1.2em; }
 #banner { background: var(--y); color: var(--k); font: 700 1rem var(--pixel); text-align: center; padding: .5em 16px; }
 #banner .btn { margin-left: .8em; }
 
@@ -158,6 +162,7 @@ footer a { color: var(--l); }
 </style>
 <!--BODY-->
 <header id="hud" aria-label="Il tuo viaggio"></header>
+<div id="waking" hidden role="status">Il server si sta svegliando, un momento…</div>
 <div id="banner" hidden role="status">Nuova versione: <button class="btn" data-act="reload">ricarica</button></div>
 <main id="view" tabindex="-1"></main>
 <dialog id="dlg" aria-label="Incontro"></dialog>

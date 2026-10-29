@@ -83,6 +83,16 @@ src/server/
 src/viaggio/   the page: canvas for the world, HTML for the words, suoni.ts for sound
 ```
 
+**Accounts and guests.** Signed in, the journey lives in Neon and follows the
+player to every browser. Without an account it stays in this browser, and the
+game says so, with an *Accedi* button in the top bar and in the first-visit
+dialog. On sign-in, a guest journey played in that browser is joined to the
+account (`POST /api/viaggio/ospite`): every event is re-checked by the rules
+on top of the account's log and stamped with the server's clock; visitor
+events are dropped, since the server cannot know who the guest met. Only a
+real 401 starts a guest game: if the server is asleep (Render's free plan),
+the page says *Il server si sta svegliando* and waits.
+
 The game is an event log, like the test: the browser sends what happened
 (`card … recalled`), the server replays the log, checks the event against the
 rules and today's visitor, stamps it with its own clock and stores only the
@@ -210,6 +220,7 @@ real users, add an engine version to `tests` and keep old versions replayable.
 | POST | `/api/viaggio/eventi` | `{index, event}` → checked by the rules, stamped, stored |
 | GET | `/api/viaggio/oggi` | today's sky, moon and visitor |
 | POST | `/api/viaggio/luogo` | `{kind, name, lat, lon}`, rounded to 0.1° |
+| POST | `/api/viaggio/ospite` | `{events, place}` → a guest journey joined to the account |
 | POST | `/api/viaggio/ingresso` | the diagnostic flags its right and credited towns |
 | GET | `/api/meteo?lat&lon` | the sky of a cell (guests) |
 | GET | `/api/luoghi?q` · `/api/luoghi/nome?lat&lon` | city search, a cell's name |

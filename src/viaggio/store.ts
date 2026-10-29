@@ -100,6 +100,20 @@ const KEY = "viaggio.guest.v1";
 const get = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 const set = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* private mode: in memory only */ } };
 
+/**
+ * A journey played in this browser without an account, joined to the account
+ * that signs in here. The server re-checks every event; visitor events are
+ * dropped (it cannot know who the guest met). Afterwards the browser copy is gone.
+ */
+export async function joinGuestJourney(): Promise<{ added: number; skipped: number } | null> {
+  const g = new GuestGame();
+  await g.load();
+  if (!g.events.length) return null;
+  const r = await api<{ added: number; skipped: number }>("/api/viaggio/ospite", { events: g.events, place: g.place });
+  g.clear();
+  return r;
+}
+
 export class GuestGame implements Game {
   readonly kind = "guest";
   state = replay([]);
@@ -120,6 +134,12 @@ export class GuestGame implements Game {
   }
   private save() {
     set(KEY, JSON.stringify({ events: this.events, place: this.place, days: this.days }));
+  }
+  /** Forget this browser's journey, once it has been joined to an account. */
+  clear() {
+    try { localStorage.removeItem(KEY); } catch { /* nothing stored */ }
+    this.events = [];
+    this.state = replay([]);
   }
 
   async send(body: EventBody) {

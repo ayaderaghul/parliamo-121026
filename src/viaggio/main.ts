@@ -19,7 +19,7 @@ import {
   type Answer, type Gem, type GameState, type Grade, type Visitor,
 } from "../game/rules";
 import { api, ApiError } from "../client/store";
-import { AccountGame, GuestGame, type Game, type Place, type Today } from "./store";
+import { AccountGame, GuestGame, joinGuestJourney, type Game, type Place, type Today } from "./store";
 import * as px from "./pixel";
 import * as S from "./suoni";
 
@@ -38,6 +38,7 @@ const plural = (g: Gem, n: number) => GEM_NAME[g][n === 1 ? 0 : 1];
 let ICONS: Record<string, string> = {};
 
 let game: Game;
+let userName = "";
 let todayInfo: Today | null = null;
 let anim = 0; // the running animation loop's token
 
@@ -115,6 +116,9 @@ function renderHud() {
       <b>${sky ? SKY_WORD[sky.sky] : "…"}</b> ${esc(place)}
       ${sky?.at ? `<small>aggiornato alle ${hhmm(sky.at)}</small>` : ""}
     </button>
+    ${game.kind === "guest"
+      ? `<button class="btn small" data-act="login" title="Il viaggio si salva sul tuo account">ACCEDI</button>`
+      : `<span class="who" title="Il viaggio si salva sul tuo account">${esc(userName)}</span>`}
     <span class="audio">
       <button class="link" data-act="sfx" aria-pressed="${S.sfxEnabled()}" title="Effetti sonori">SUONI ${S.sfxEnabled() ? "SÌ" : "NO"}</button>
       <button class="link" data-act="music" aria-pressed="${S.musicEnabled()}" title="Musica">MUSICA ${S.musicEnabled() ? "SÌ" : "NO"}</button>
@@ -171,7 +175,8 @@ function renderItaly() {
         ${vis && !s.visited.includes(vis) ? `<p class="visit">${VISITOR[vis].line} <a href="#regione/${currentRegion(s)}">Vai</a></p>` : ""}
         ${game.kind === "account" && !s.importDone ? `<p class="small">Hai fatto il test diagnostico di Parliamo?
           <button class="link" data-act="import">Usalo come esame d'ingresso</button>: le regole giuste diventano città con la bandiera.</p>` : ""}
-        ${game.kind === "guest" ? `<p class="small">Stai giocando senza account: il viaggio resta su questo browser.</p>` : ""}
+        ${game.kind === "guest" ? `<p class="visit">Stai giocando senza account: il viaggio resta solo su questo browser.
+          <button class="btn" data-act="login">Accedi per salvarlo</button></p>` : ""}
       </aside>
     </div>`;
   const cv = $<HTMLCanvasElement>("#map");
@@ -874,6 +879,8 @@ function placePicker(first = false) {
   const d = dialog(`<h2>DOVE SEI?</h2>
     <p>Il cielo del gioco è quello vero: pioggia, nebbia e luna cambiano chi incontri.
       ${first ? "Prima di partire, dimmi dove sei." : ""}</p>
+    ${game.kind === "guest" ? `<p class="visit">Hai già un account? <button class="btn" data-act="login">Accedi</button>
+      e ritrovi il tuo viaggio, anche il luogo.</p>` : ""}
     <p><button class="btn" data-act="here">Usa la mia posizione</button></p>
     <p class="small">Il browser ti chiederà il permesso. Salviamo solo una zona di circa 10 km, mai la posizione esatta.</p>
     <form id="search"><label for="q">Oppure cerca una città italiana</label>
@@ -951,6 +958,7 @@ document.addEventListener("click", (e) => {
   const el = (e.target as HTMLElement).closest<HTMLElement>("[data-act]");
   if (!el) return;
   const act = el.dataset.act;
+  if (act === "login") return loginDialog();
   if (act === "sfx") { S.toggleSfx(); return renderHud(); }
   if (act === "music") { S.toggleMusic(); return renderHud(); }
   if (act === "place") placePicker();
@@ -964,23 +972,117 @@ document.addEventListener("click", (e) => {
   }
 });
 
+// ── signing in ───────────────────────────────────────────────────────────────
+
+function loginDialog() {
+  const d = dialog(`<h2>ACCEDI</h2>
+    <p>Con l'account il viaggio si salva sul server e ti segue su ogni browser e dispositivo.
+      ${hasGuestJourney() ? "Il viaggio fatto qui senza account verrà aggiunto al tuo." : ""}</p>
+    <form id="loginform" novalidate>
+      <label for="le">Email</label><input id="le" type="email" autocomplete="email" required>
+      <label for="lp">Password</label><input id="lp" type="password" autocomplete="current-password" required>
+      <p class="err" id="lerr" role="alert"></p>
+      <p><button class="btn" id="lgo">Accedi</button> <button type="button" class="link" data-act="close">Annulla</button></p>
+    </form>`);
+  ($("#le", d) as HTMLInputElement).focus();
+  $("#loginform", d).addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = $<HTMLButtonElement>("#lgo", d);
+    btn.disabled = true;
+    try {
+      const { user } = await api<{ user: { name: string } }>("/api/auth/login", {
+        email: ($("#le", d) as HTMLInputElement).value.trim(), password: ($("#lp", d) as HTMLInputElement).value,
+      });
+      userName = user.name;
+      await becomeAccount();
+      if (d.open) d.close();
+      if (!game.place) placePicker(true); // the account has no place yet: ask now
+    } catch (err) {
+      $("#lerr", d).textContent = err instanceof ApiError ? err.message : "Il server non risponde, riprova tra poco.";
+      btn.disabled = false;
+    }
+  });
+}
+
+const hasGuestJourney = () => {
+  try { const raw = localStorage.getItem("viaggio.guest.v1"); return !!raw && (JSON.parse(raw).events ?? []).length > 0; } catch { return false; }
+};
+
+/** Switch to the account's journey, joining whatever was played here as a guest. */
+async function becomeAccount() {
+  if (hasGuestJourney()) {
+    try {
+      const r = await joinGuestJourney();
+      if (r) toast(`Il viaggio di questo browser è sul tuo account: ${r.added} passi aggiunti${r.skipped ? `, ${r.skipped} non ripetibili (visitatori o già fatti)` : ""}.`);
+    } catch (err) {
+      toast(`<span class="err">Non sono riuscito ad aggiungere il viaggio di questo browser: resta qui, riprova più tardi.</span>`);
+    }
+  }
+  const g = new AccountGame();
+  await withRetry(() => g.load());
+  game = g;
+  await refreshToday();
+  renderHud();
+  route();
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Render's free plan sleeps: the first request can take up to a minute. Wait
+ * for it, saying so, rather than falling back to a guest game by mistake.
+ */
+async function withRetry<T>(job: () => Promise<T>): Promise<T> {
+  for (let i = 0; ; i++) {
+    try {
+      const r = await job();
+      $("#waking").hidden = true;
+      return r;
+    } catch (err) {
+      if (err instanceof ApiError && err.status >= 400 && err.status < 500) throw err; // a real answer, not a sleeping server
+      if (i >= 15) throw err;
+      $("#waking").hidden = false;
+      await sleep(4000);
+    }
+  }
+}
+
 async function boot() {
   ICONS = Object.fromEntries([
     ...Object.entries(px.GEM_SPRITE).map(([k, v]) => [k, px.icon(v)]), ["coin", px.icon(px.COIN)],
     ...Object.entries(px.SOUVENIR).map(([k, v]) => ["s-" + k, px.icon(v, 6)]),
     ["o-zaino", px.icon(px.BACKPACK_ICON, 6)], ["o-bicicletta", px.icon(px.BIKE, 4)], ["o-vespa", px.icon(px.VESPA, 4)], ["o-chiavi", px.icon(px.KEYS, 8)],
   ]);
+  // Only a real "not signed in" (401) means a guest game. Anything else is a
+  // sleeping or unreachable server, and the game waits instead of starting a
+  // guest journey that would stay in this browser.
+  let signedIn = false;
   try {
-    await api("/api/me");
-    game = new AccountGame();
-  } catch {
-    game = new GuestGame();
+    const me = await withRetry(() => api<{ user: { name: string } }>("/api/me"));
+    signedIn = true;
+    userName = me.user.name;
+  } catch (err) {
+    if (!(err instanceof ApiError && err.status === 401)) {
+      $("#view").innerHTML = `<div class="battle"><h2>Il server non risponde</h2>
+        <p>Il tuo viaggio è al sicuro sul server, ma ora non riesco a raggiungerlo.</p>
+        <p><button class="btn" data-act="reload">Riprova</button></p></div>`;
+      return;
+    }
   }
-  try { await game.load(); } catch { game = new GuestGame(); await game.load(); }
-  renderHud();
-  route();
-  await refreshToday();
-  route();
+  if (signedIn) {
+    try { await becomeAccount(); } catch {
+      $("#view").innerHTML = `<div class="battle"><h2>Non riesco a caricare il tuo viaggio</h2>
+        <p>È al sicuro sul server. Riprova tra poco.</p><p><button class="btn" data-act="reload">Riprova</button></p></div>`;
+      return;
+    }
+  } else {
+    game = new GuestGame();
+    await game.load();
+    renderHud();
+    route();
+    await refreshToday();
+    route();
+  }
   if (!game.place) placePicker(true);
   setInterval(checkVersion, 10 * 60_000);
   window.addEventListener("focus", checkVersion);

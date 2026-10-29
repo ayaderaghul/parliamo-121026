@@ -186,6 +186,26 @@ describe("the game log", () => {
     expect((await b.get("/api/viaggio")).body.events).toEqual([]);
   });
 
+  it("joins a guest journey to the account, re-checked, without visitor events", async () => {
+    const a = await player("viaggio6@example.com");
+    await a.post("/api/viaggio/eventi").send({ index: 0, event: { t: "lesson", town: root.id } });
+    const locked = townsIn("A1").find((t) => t.prereqs.length > 0)!;
+    const guest = [
+      { t: "card", card: root.cards[0], grade: "si", at: "2026-10-01T10:00:00Z", v: "old" },
+      { t: "proverb", id: PROVERBI[0].id, correct: true, at: "2026-10-01T10:01:00Z", v: "old" }, // a visitor: dropped
+      { t: "card", card: locked.cards[0], grade: "si", at: "2026-10-01T10:02:00Z", v: "old" },   // a locked town: refused
+      { t: "battle", town: root.id, answers: root.items.slice(0, 3).map((item) => ({ item, correct: true })), gold: 999 },
+    ];
+    const r = await a.post("/api/viaggio/ospite").send({ events: guest, place: { kind: "citta", name: "Asolo", lat: 45.8, lon: 11.9 } });
+    expect(r.body).toEqual({ added: 2, skipped: 2 });
+    const g = await a.get("/api/viaggio");
+    expect(g.body.events.map((e: any) => e.t)).toEqual(["lesson", "card", "battle"]);
+    expect(g.body.events.every((e: any) => e.at > "2026-10-02")).toBe(true); // the server's clock, not the browser's
+    expect("gold" in g.body.events[2]).toBe(false);
+    expect(g.body.place).toMatchObject({ name: "Asolo", lat: 45.8, lon: 11.9 });
+    expect(replay(g.body.events).quizWon[root.id]).toBe(true);
+  });
+
   it("needs a finished diagnostic for the entrance exam", async () => {
     const a = await player("viaggio5@example.com");
     expect((await a.post("/api/viaggio/ingresso").send({})).status).toBe(400);

@@ -189,6 +189,57 @@ export function mountViaggio(app: Express, { db, auth, meteo, buildId, allowForc
     }
   });
 
+  /**
+   * A guest's journey, joined to the account on sign-in. Each event is checked
+   * against the rules on top of the account's own log and stamped with the
+   * server's clock, so nothing a browser stored can bypass a rule. Visitor
+   * events are dropped: the server cannot know which visitor the guest met.
+   */
+  app.post("/api/viaggio/ospite", auth, async (req, res) => {
+    const id = uid(req);
+    const list = req.body?.events;
+    if (!Array.isArray(list) || list.length > 5000) bad("Viaggio non valido.");
+    const c = await db.connect();
+    try {
+      await c.query("begin");
+      await c.query("select pg_advisory_xact_lock(hashtext($1))", [id]);
+      const events = await loadEvents(c, id);
+      let state = replay(events);
+      let index = events.length, added = 0, skipped = 0;
+      let at = new Date().toISOString();
+      if (at < state.lastAt) at = state.lastAt;
+      for (const raw of list) {
+        let body: EventBody;
+        try { body = normalize(raw); } catch { skipped++; continue; }
+        if (NEEDS[body.t] || body.t === "import") { skipped++; continue; }
+        const e = { ...body, at, v: CONTENT_VERSION } as GameEvent;
+        try { state = tryStep(state, e, { visitor: null }); } catch (err) {
+          if (err instanceof RuleError) { skipped++; continue; }
+          throw err;
+        }
+        await c.query("insert into game_events (user_id, idx, body, at, v) values ($1, $2, $3, $4, $5)",
+          [id, index++, JSON.stringify(body), at, CONTENT_VERSION]);
+        added++;
+      }
+      const place = req.body?.place;
+      if (place && typeof place === "object") {
+        const lat = Number(place.lat), lon = Number(place.lon);
+        if (Number.isFinite(lat) && Number.isFinite(lon) && inItaly(cell(lat), cell(lon))) {
+          await c.query(
+            `insert into game_settings (user_id, place) values ($1, $2) on conflict (user_id) do nothing`,
+            [id, JSON.stringify({ kind: place.kind === "qui" ? "qui" : "citta", name: String(place.name ?? "").slice(0, 80), lat: cell(lat), lon: cell(lon) })]);
+        }
+      }
+      await c.query("commit");
+      res.json({ added, skipped });
+    } catch (err) {
+      await c.query("rollback").catch(() => {});
+      throw err;
+    } finally {
+      c.release();
+    }
+  });
+
   /** Esame d'ingresso: the Parliamo diagnostic flags every right or credited town. */
   app.post("/api/viaggio/ingresso", auth, async (req, res) => {
     const id = uid(req);
